@@ -1,0 +1,35 @@
+using Microsoft.EntityFrameworkCore;
+using BilliardsBooking.API.Models;
+
+namespace BilliardsBooking.API.Data
+{
+    public class AppDbContext : DbContext
+    {
+        public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+
+        public DbSet<User> Users { get; set; } = null!;
+        public DbSet<BilliardTable> Tables { get; set; } = null!;
+        public DbSet<Booking> Bookings { get; set; } = null!;
+        public DbSet<BookingSlot> BookingSlots { get; set; } = null!;
+        
+        public DbSet<Coach> Coaches { get; set; } = null!;
+        public DbSet<CoachAvailability> CoachAvailabilities { get; set; } = null!;
+        public DbSet<CoachingSession> CoachingSessions { get; set; } = null!;
+        
+        public DbSet<FnBMenuItem> FnBMenuItems { get; set; } = null!;
+        public DbSet<FnBOrder> FnBOrders { get; set; } = null!;
+        public DbSet<FnBOrderItem> FnBOrderItems { get; set; } = null!;
+        
+        public DbSet<MembershipPlan> MembershipPlans { get; set; } = null!;
+        public DbSet<UserMembership> UserMemberships { get; set; } = null!;
+        public DbSet<MembershipBenefitUsage> MembershipBenefitUsages { get; set; } = null!;
+        
+        public DbSet<Payment> Payments { get; set; } = null!;
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+            modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+        }
+    }
+}

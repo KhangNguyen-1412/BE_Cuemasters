@@ -1,0 +1,98 @@
+using BilliardsBooking.API.Data;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
+using System.Security.Claims;
+var builder = WebApplication.CreateBuilder(args);
+
+// Add services to the container.
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+builder.Services.AddSignalR();
+
+// DI Services
+builder.Services.AddScoped<BilliardsBooking.API.Services.IAuthService, BilliardsBooking.API.Services.AuthService>();
+builder.Services.AddScoped<BilliardsBooking.API.Services.IBookingService, BilliardsBooking.API.Services.BookingService>();
+builder.Services.AddScoped<BilliardsBooking.API.Services.ITableService, BilliardsBooking.API.Services.TableService>();
+builder.Services.AddScoped<BilliardsBooking.API.Services.ICoachService, BilliardsBooking.API.Services.CoachService>();
+builder.Services.AddScoped<BilliardsBooking.API.Services.IFnBService, BilliardsBooking.API.Services.FnBService>();
+builder.Services.AddScoped<BilliardsBooking.API.Services.IMembershipService, BilliardsBooking.API.Services.MembershipService>();
+builder.Services.AddScoped<BilliardsBooking.API.Services.IPaymentService, BilliardsBooking.API.Services.PaymentService>();
+
+// Configure CORS
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("ReactApp", policy =>
+    {
+        policy.WithOrigins("http://localhost:5173", "http://localhost:3000")
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
+
+// Configure Entity Framework Core with SQL Server
+builder.Services.AddDbContext<AppDbContext>(options =>
+{
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
+});
+
+// Configure JWT Authentication
+var jwtSettings = builder.Configuration.GetSection("JwtSettings");
+var secretKey = jwtSettings["SecretKey"] ?? "default_secret_key_for_dev_only";
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwtSettings["Issuer"],
+            ValidAudience = jwtSettings["Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
+            RoleClaimType = ClaimTypes.Role
+        };
+    });
+
+builder.Services.AddAuthorization();
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline.
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseCors("ReactApp");
+
+app.UseHttpsRedirection();
+
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapControllers();
+app.MapHub<BilliardsBooking.API.Hubs.TableStatusHub>("/hubs/tablestatus");
+
+// Seed Database
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    try
+    {
+        await SeedData.InitializeAsync(services);
+    }
+    catch (Exception ex)
+    {
+        var logger = services.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "An error occurred seeding the DB.");
+    }
+}
+
+app.Run();
