@@ -1,4 +1,5 @@
 using System;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using BilliardsBooking.API.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -34,6 +35,28 @@ namespace BilliardsBooking.API.Controllers
 
             var availability = await _coachService.GetCoachAvailabilityAsync(id, date);
             return Ok(availability);
+        }
+        [HttpPost("{id}/book")]
+        [Authorize]
+        public async Task<IActionResult> BookCoach(Guid id, [FromBody] BilliardsBooking.API.DTOs.CreateCoachingSessionRequest request)
+        {
+            var userIdString = User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userIdString) || !Guid.TryParse(userIdString, out Guid userId))
+            {
+                return Unauthorized();
+            }
+
+            request.CoachId = id; // Ensure route id matches
+
+            try
+            {
+                var sessionId = await _coachService.BookCoachSessionAsync(userId, request);
+                return Ok(new { Message = "Coach booked successfully.", SessionId = sessionId });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { Message = ex.Message });
+            }
         }
     }
 }

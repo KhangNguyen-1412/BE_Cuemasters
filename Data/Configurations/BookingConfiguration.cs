@@ -8,17 +8,18 @@ namespace BilliardsBooking.API.Data.Configurations
     {
         public void Configure(EntityTypeBuilder<BookingSlot> builder)
         {
-            // Protect against Double Booking by database-level unique constrained filter
-            builder.HasIndex(bs => new { bs.TableId, bs.SlotDate, bs.SlotStart })
-                .IsUnique()
-                .HasFilter("[IsActive] = 1");
+            // Category-level slots: no table-specific uniqueness (TableId is nullable until check-in).
+            // The BookingService.CreateBookingAsync enforces category capacity with a buffer.
+            // Composite index to accelerate category-capacity counts.
+            builder.HasIndex(bs => new { bs.RequestedTableType, bs.SlotDate, bs.SlotStart, bs.IsActive });
 
             builder.Property(bs => bs.IsActive).HasDefaultValue(true);
 
             builder.HasOne(bs => bs.Table)
                 .WithMany()
                 .HasForeignKey(bs => bs.TableId)
-                .OnDelete(DeleteBehavior.Restrict);
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false);
         }
     }
 
@@ -27,7 +28,14 @@ namespace BilliardsBooking.API.Data.Configurations
         public void Configure(EntityTypeBuilder<Booking> builder)
         {
             builder.Property(b => b.RowVersion).IsRowVersion();
-            
+
+            // TableId is nullable: online reservations remain unassigned until the admin checks them in.
+            builder.HasOne(b => b.Table)
+                .WithMany(t => t.Bookings)
+                .HasForeignKey(b => b.TableId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false);
+
             // Delete slots cascadingly if booking is deleted
             builder.HasMany(b => b.Slots)
                 .WithOne(bs => bs.Booking)

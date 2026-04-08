@@ -21,11 +21,16 @@ namespace BilliardsBooking.API.Models
     public class Booking
     {
         public Guid Id { get; set; }
-        public Guid UserId { get; set; }
+        public Guid? UserId { get; set; }  // Nullable for walk-in bookings
         public User? User { get; set; }
 
-        public int TableId { get; set; }
+        // Null for unassigned online reservations; set when admin assigns a physical table at check-in,
+        // or set immediately for walk-ins.
+        public int? TableId { get; set; }
         public BilliardTable? Table { get; set; }
+
+        // The category the customer reserved. Walk-ins still set this from the chosen table's Type.
+        public TableType RequestedTableType { get; set; }
 
         public DateTime BookingDate { get; set; }
         public TimeSpan StartTime { get; set; }
@@ -34,6 +39,21 @@ namespace BilliardsBooking.API.Models
         public decimal TotalTableCost { get; set; }
         public decimal DiscountAmount { get; set; }
         public BookingStatus Status { get; set; } = BookingStatus.Pending;
+
+        public BookingType BookingType { get; set; } = BookingType.Online;
+
+        // Deposit tracking
+        public decimal DepositAmount { get; set; }
+        public bool DepositForfeited { get; set; }
+
+        // Actual session tracking (real timer, not booked time)
+        public DateTime? CheckedInAt { get; set; }
+        public DateTime? CheckedOutAt { get; set; }
+        public DateTime? AssignedAt { get; set; }  // When admin assigned a physical table at check-in
+        public decimal? ActualCost { get; set; }  // Calculated at checkout
+
+        // Walk-in guest name (no UserId required)
+        public string? GuestName { get; set; }
 
         public byte[]? RowVersion { get; set; }
 
@@ -46,12 +66,16 @@ namespace BilliardsBooking.API.Models
     public class BookingSlot
     {
         public long Id { get; set; }
-        
+
         public Guid BookingId { get; set; }
         public Booking? Booking { get; set; }
 
-        public int TableId { get; set; }
+        // Nullable: online reservations don't claim a specific table until check-in.
+        public int? TableId { get; set; }
         public BilliardTable? Table { get; set; }
+
+        // Category-level slot occupancy (drives the buffer/capacity check).
+        public TableType RequestedTableType { get; set; }
 
         public DateTime SlotDate { get; set; }
         public TimeSpan SlotStart { get; set; }

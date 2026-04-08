@@ -2,6 +2,7 @@ using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using BilliardsBooking.API.DTOs;
+using BilliardsBooking.API.Enums;
 using BilliardsBooking.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -30,6 +31,13 @@ namespace BilliardsBooking.API.Controllers
             }
 
             var result = await _bookingService.GetBookingsForUserAsync(userId, page, pageSize, status);
+            return Ok(result);
+        }
+
+        [HttpGet("category-availability")]
+        public async Task<IActionResult> GetCategoryAvailability([FromQuery] TableType tableType, [FromQuery] DateTime date)
+        {
+            var result = await _bookingService.GetCategoryAvailabilityAsync(tableType, date);
             return Ok(result);
         }
 

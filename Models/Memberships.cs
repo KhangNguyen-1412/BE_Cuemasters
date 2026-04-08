@@ -13,7 +13,10 @@ namespace BilliardsBooking.API.Models
         public int TableDiscountPercent { get; set; }
         public bool PriorityBooking { get; set; }
         public int FreeCoachingSessionsPerMonth { get; set; }
+        public int MaxAdvanceBookingDays { get; set; } = 0; // 0 = same-day only (guest default)
         public bool IsActive { get; set; } = true;
+
+        public ICollection<UserMembership> UserMemberships { get; set; } = new List<UserMembership>();
     }
 
     public class UserMembership

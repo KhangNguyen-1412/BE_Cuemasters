@@ -35,7 +35,7 @@ namespace BilliardsBooking.API.Services
             {
                 Id = Guid.NewGuid(),
                 BookingId = bookingId,
-                UserId = booking.UserId,
+                UserId = booking.UserId ?? Guid.Empty,
                 Amount = booking.TotalTableCost, /* Booking doesn't have TotalPrice, wait */
                 Method = request.PaymentMethod == "Cash" ? PaymentMethod.Cash : PaymentMethod.VnPay,
                 Status = PaymentStatus.Completed, // Assume immediate success for MVP

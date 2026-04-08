@@ -1,0 +1,12 @@
+bin/
+obj/
+.vs/
+*.user
+*.userosscache
+*.suo
+.sln.docstates
+.git
+.gitignore
+README.md
+.env
+.env.local

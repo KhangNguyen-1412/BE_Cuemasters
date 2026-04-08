@@ -44,6 +44,15 @@ namespace BilliardsBooking.API.Controllers.Admin
             var menuItems = await _context.FnBMenuItems.CountAsync();
             var activeMemberships = await _context.UserMemberships.CountAsync(m => m.IsActive);
 
+            // No-show KPIs
+            var today = DateTime.UtcNow.Date;
+            var noShowsToday = await _context.Bookings
+                .Where(b => b.Status == BookingStatus.NoShow && b.BookingDate.Date == today)
+                .CountAsync();
+            var forfeitedDepositsToday = await _context.Bookings
+                .Where(b => b.Status == BookingStatus.NoShow && b.DepositForfeited && b.BookingDate.Date == today)
+                .SumAsync(b => b.DepositAmount);
+
             return Ok(new AdminDashboardStatsResponse
             {
                 Revenue = totalRevenue,
@@ -53,7 +62,9 @@ namespace BilliardsBooking.API.Controllers.Admin
                 TotalTables = totalTables,
                 ActiveCoaches = activeCoaches,
                 MenuItems = menuItems,
-                ActiveMemberships = activeMemberships
+                ActiveMemberships = activeMemberships,
+                NoShowsToday = noShowsToday,
+                ForfeitedDepositsToday = forfeitedDepositsToday
             });
         }
     }

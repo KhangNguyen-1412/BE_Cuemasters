@@ -16,8 +16,27 @@ namespace BilliardsBooking.API.DTOs
 
     public class CoachAvailabilitySlotResponse
     {
-        public System.DateTime StartTime { get; set; }
-        public System.DateTime EndTime { get; set; }
+        public string StartTime { get; set; } = string.Empty;
+        public string EndTime { get; set; } = string.Empty;
         public bool IsAvailable { get; set; }
+    }
+
+    public class CoachAvailabilityResponse
+    {
+        public int Id { get; set; }
+        public int DayOfWeek { get; set; }
+        public string StartTime { get; set; } = string.Empty;
+        public string EndTime { get; set; } = string.Empty;
+        public bool IsBlocked { get; set; }
+        public string? SpecificDate { get; set; }
+    }
+
+    public class UpsertCoachAvailabilityRequest
+    {
+        public int DayOfWeek { get; set; }
+        public string StartTime { get; set; } = string.Empty;
+        public string EndTime { get; set; } = string.Empty;
+        public bool IsBlocked { get; set; }
+        public DateTime? SpecificDate { get; set; }
     }
 }

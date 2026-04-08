@@ -18,10 +18,12 @@ namespace BilliardsBooking.API.Controllers.Admin
     public class TablesController : ControllerBase
     {
         private readonly AppDbContext _context;
+        private readonly BilliardsBooking.API.Services.IBookingService _bookingService;
 
-        public TablesController(AppDbContext context)
+        public TablesController(AppDbContext context, BilliardsBooking.API.Services.IBookingService bookingService)
         {
             _context = context;
+            _bookingService = bookingService;
         }
 
         [HttpGet]
@@ -152,6 +154,22 @@ namespace BilliardsBooking.API.Controllers.Admin
             return NoContent();
         }
 
+        [HttpPost("{id:int}/walkin")]
+        public async Task<IActionResult> StartWalkIn(int id, [FromBody] WalkInRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.GuestName))
+            {
+                return BadRequest(new { Message = "Guest name is required." });
+            }
+
+            var (success, message, bookingId) = await _bookingService.StartWalkInAsync(id, request.GuestName.Trim());
+            if (!success)
+            {
+                return BadRequest(new { Message = message });
+            }
+            return Ok(new { Id = bookingId, Message = message });
+        }
+
         private async Task<List<Booking>> LoadRelevantBookingsAsync(List<int> tableIds)
         {
             if (tableIds.Count == 0)
@@ -165,8 +183,9 @@ namespace BilliardsBooking.API.Controllers.Admin
             return await _context.Bookings
                 .Include(booking => booking.User)
                 .Where(booking =>
-                    tableIds.Contains(booking.TableId) &&
+                    booking.TableId.HasValue && tableIds.Contains(booking.TableId.Value) &&
                     booking.Status != BookingStatus.Cancelled &&
+                    booking.Status != BookingStatus.NoShow &&
                     booking.BookingDate >= today &&
                     booking.BookingDate <= futureWindow)
                 .ToListAsync();
@@ -204,9 +223,11 @@ namespace BilliardsBooking.API.Controllers.Admin
                 IsActive = table.IsActive,
                 PositionX = table.PositionX,
                 PositionY = table.PositionY,
-                CurrentCustomerName = currentBooking?.User?.FullName,
-                CurrentSessionStartedAt = currentBooking == null ? null : currentBooking.BookingDate.Add(currentBooking.StartTime),
+                CurrentCustomerName = currentBooking?.GuestName ?? currentBooking?.User?.FullName,
+                CurrentSessionStartedAt = currentBooking?.CheckedInAt ?? (currentBooking == null ? null : currentBooking.BookingDate.Add(currentBooking.StartTime)),
                 NextBookingStartTime = nextBooking == null ? null : nextBooking.BookingDate.Add(nextBooking.StartTime),
+                NextBookingId = nextBooking?.Id.ToString(),
+                NextCustomerName = nextBooking?.GuestName ?? nextBooking?.User?.FullName,
                 CurrentSessionAmount = currentBooking?.TotalTableCost ?? 0
             };
         }

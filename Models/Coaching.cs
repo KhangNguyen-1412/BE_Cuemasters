@@ -43,6 +43,8 @@ namespace BilliardsBooking.API.Models
         public Guid CoachId { get; set; }
         public Coach? Coach { get; set; }
 
+        // Null at creation time — the session is independent of any table reservation.
+        // Populated when an admin links this session to a table booking at checkout.
         public Guid? BookingId { get; set; }
         public Booking? Booking { get; set; }
 
@@ -59,5 +61,9 @@ namespace BilliardsBooking.API.Models
 
         public bool IsCompleted { get; set; }
         public string? CoachNotes { get; set; }
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? LinkedAt { get; set; }  // When an admin merged this into a table booking
+        public DateTime? CancelledAt { get; set; }
     }
 }

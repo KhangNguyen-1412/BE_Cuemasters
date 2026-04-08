@@ -137,9 +137,9 @@ namespace BilliardsBooking.API.Controllers.Admin
                 return NotFound(new { Message = "Booking not found." });
             }
 
-            if (booking.Status == BookingStatus.Cancelled && newStatus != BookingStatus.Cancelled)
+            if ((booking.Status == BookingStatus.Cancelled || booking.Status == BookingStatus.NoShow) && newStatus != booking.Status)
             {
-                return BadRequest(new { Message = "Cancelled bookings cannot be reactivated from this endpoint." });
+                return BadRequest(new { Message = "Cancelled or NoShow bookings cannot be reactivated from this endpoint." });
             }
 
             booking.Status = newStatus;
@@ -256,37 +256,51 @@ namespace BilliardsBooking.API.Controllers.Admin
             var fnbTotalByBookingId = fnbTotals.ToDictionary(item => item.BookingId, item => item.Total);
             var coachingByBookingId = coachingSessions
                 .Where(session => session.BookingId.HasValue)
-                .ToDictionary(session => session.BookingId!.Value, session => session);
+                .GroupBy(session => session.BookingId!.Value)
+                .ToDictionary(group => group.Key, group => group.ToList());
 
             return bookings.Select(booking =>
             {
                 latestPaymentByBookingId.TryGetValue(booking.Id, out var payment);
                 fnbTotalByBookingId.TryGetValue(booking.Id, out var fnbTotal);
-                coachingByBookingId.TryGetValue(booking.Id, out var coachingSession);
+                coachingByBookingId.TryGetValue(booking.Id, out var bookingCoachingSessions);
 
-                var coachingTotal = coachingSession?.Cost ?? 0;
-                var coachName = coachingSession != null && coachNames.TryGetValue(coachingSession.CoachId, out var foundCoachName)
-                    ? foundCoachName
-                    : null;
+                var coachingTotal = bookingCoachingSessions?.Sum(session => session.Cost) ?? 0;
+                var coachName = bookingCoachingSessions == null
+                    ? null
+                    : string.Join(", ",
+                        bookingCoachingSessions
+                            .Select(session => coachNames.TryGetValue(session.CoachId, out var foundCoachName)
+                                ? foundCoachName
+                                : session.CoachId.ToString())
+                            .Distinct());
 
                 return new AdminBookingResponse
                 {
                     Id = booking.Id.ToString(),
-                    UserId = booking.UserId.ToString(),
-                    UserFullName = booking.User?.FullName ?? string.Empty,
+                    UserId = booking.UserId.HasValue ? booking.UserId.Value.ToString() : string.Empty,
+                    UserFullName = booking.User?.FullName ?? booking.GuestName ?? string.Empty,
                     UserEmail = booking.User?.Email ?? string.Empty,
                     TableId = booking.TableId,
                     TableNumber = booking.Table?.TableNumber ?? string.Empty,
+                    RequestedTableType = booking.RequestedTableType,
                     BookingDate = booking.BookingDate,
                     StartTime = booking.BookingDate.Add(booking.StartTime),
                     EndTime = booking.BookingDate.Add(booking.EndTime),
-                    TotalPrice = booking.TotalTableCost + fnbTotal + coachingTotal,
+                    TotalPrice = booking.ActualCost ?? (booking.TotalTableCost + fnbTotal + coachingTotal),
                     DiscountAmount = booking.DiscountAmount,
                     FnBTotal = fnbTotal,
                     CoachingTotal = coachingTotal,
                     PaymentAmount = payment?.Amount ?? 0,
                     PaymentStatus = payment?.Status.ToString(),
                     Status = booking.Status.ToString(),
+                    BookingType = booking.BookingType.ToString(),
+                    DepositAmount = booking.DepositAmount,
+                    DepositForfeited = booking.DepositForfeited,
+                    CheckedInAt = booking.CheckedInAt,
+                    CheckedOutAt = booking.CheckedOutAt,
+                    ActualCost = booking.ActualCost,
+                    GuestName = booking.GuestName,
                     CreatedAt = booking.CreatedAt,
                     CancelledAt = booking.CancelledAt,
                     CoachName = coachName
@@ -303,6 +317,62 @@ namespace BilliardsBooking.API.Controllers.Admin
                 return BadRequest(new { Message = message });
             }
             return CreatedAtAction(nameof(GetBookingById), new { id = bookingId }, new { Id = bookingId, Message = message });
+        }
+
+        [HttpPut("{id:guid}/checkin")]
+        public async Task<IActionResult> CheckIn(Guid id, [FromBody] CheckInRequest request)
+        {
+            var (success, message) = await _bookingService.CheckInAsync(id, request.TableId);
+            if (!success)
+            {
+                return BadRequest(new { Message = message });
+            }
+            return Ok(new { Message = message });
+        }
+
+        [HttpGet("pending-checkin")]
+        public async Task<IActionResult> GetPendingCheckins([FromQuery] DateTime date)
+        {
+            if (date == default) date = DateTime.UtcNow.Date;
+            var result = await _bookingService.GetPendingCheckinsAsync(date);
+            return Ok(result);
+        }
+
+        [HttpGet("upcoming-warnings")]
+        public async Task<IActionResult> GetUpcomingWarnings()
+        {
+            var result = await _bookingService.GetUpcomingWarningsAsync();
+            return Ok(result);
+        }
+
+        [HttpPut("{id:guid}/link-coach-session")]
+        public async Task<IActionResult> LinkCoachSession(Guid id, [FromBody] LinkCoachSessionRequest request)
+        {
+            var (success, message) = await _bookingService.LinkCoachSessionAsync(id, request.CoachingSessionId);
+            if (!success)
+            {
+                return BadRequest(new { Message = message });
+            }
+            return Ok(new { Message = message });
+        }
+
+        [HttpGet("{id:guid}/available-coach-sessions")]
+        public async Task<IActionResult> GetAvailableCoachSessions(Guid id)
+        {
+            var result = await _bookingService.GetLinkableCoachSessionsAsync(id);
+            return Ok(result);
+        }
+
+        [HttpPut("{id:guid}/checkout")]
+        public async Task<IActionResult> CheckOut(Guid id, [FromBody] CheckoutRequest? request)
+        {
+            var paymentMethod = request?.PaymentMethod ?? "Cash";
+            var (success, message, summary) = await _bookingService.CheckOutAsync(id, paymentMethod);
+            if (!success)
+            {
+                return BadRequest(new { Message = message });
+            }
+            return Ok(new { Message = message, Summary = summary });
         }
     }
 }

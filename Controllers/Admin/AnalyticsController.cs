@@ -29,6 +29,7 @@ namespace BilliardsBooking.API.Controllers.Admin
         {
             var normalizedPeriod = NormalizePeriod(period);
             var revenueByPeriod = await BuildRevenueSeriesAsync(normalizedPeriod, from, to);
+            var revenueBySource = await BuildRevenueBySourceAsync(from, to);
 
             var totalTables = await _context.Tables.CountAsync(t => t.IsActive);
             var heatmap = await BuildOccupancyHeatmapAsync(totalTables);
@@ -38,11 +39,100 @@ namespace BilliardsBooking.API.Controllers.Admin
             {
                 Period = normalizedPeriod,
                 RevenueByPeriod = revenueByPeriod,
+                RevenueBySource = revenueBySource,
                 OccupancyHeatmap = heatmap,
                 PeakHours = peakHours,
                 AverageOccupancyRate = heatmap.Count == 0 ? 0 : Math.Round(heatmap.Average(cell => cell.OccupancyRate), 2),
                 PeakOccupancyRate = peakHours.Count == 0 ? 0 : peakHours.Max(hour => hour.OccupancyRate)
             });
+        }
+
+        private async Task<List<AdminRevenueSourceResponse>> BuildRevenueBySourceAsync(DateTime? from = null, DateTime? to = null)
+        {
+            var paymentQuery = _context.Payments
+                .Where(payment => payment.Status == PaymentStatus.Completed && payment.BookingId.HasValue);
+
+            if (from.HasValue)
+            {
+                paymentQuery = paymentQuery.Where(payment => payment.CreatedAt >= from.Value);
+            }
+
+            if (to.HasValue)
+            {
+                paymentQuery = paymentQuery.Where(payment => payment.CreatedAt <= to.Value);
+            }
+
+            var bookingIds = await paymentQuery
+                .Select(payment => payment.BookingId!.Value)
+                .Distinct()
+                .ToListAsync();
+
+            if (bookingIds.Count == 0)
+            {
+                return BuildEmptyRevenueBySource();
+            }
+
+            var tableRevenue = await _context.Bookings
+                .Where(booking => bookingIds.Contains(booking.Id))
+                .Select(booking => booking.TotalTableCost)
+                .DefaultIfEmpty(0)
+                .SumAsync();
+
+            var fnbRevenue = await _context.FnBOrders
+                .Where(order => bookingIds.Contains(order.BookingId))
+                .Select(order => order.TotalAmount)
+                .DefaultIfEmpty(0)
+                .SumAsync();
+
+            var coachingRevenue = await _context.CoachingSessions
+                .Where(session => session.BookingId.HasValue && bookingIds.Contains(session.BookingId.Value))
+                .Select(session => session.Cost)
+                .DefaultIfEmpty(0)
+                .SumAsync();
+
+            var total = tableRevenue + fnbRevenue + coachingRevenue;
+
+            decimal ToPercentage(decimal amount)
+            {
+                if (total <= 0)
+                {
+                    return 0;
+                }
+
+                return Math.Round((amount / total) * 100m, 2);
+            }
+
+            return new List<AdminRevenueSourceResponse>
+            {
+                new()
+                {
+                    Label = "Tiền giờ chơi",
+                    Amount = tableRevenue,
+                    Percentage = ToPercentage(tableRevenue)
+                },
+                new()
+                {
+                    Label = "Dịch vụ F&B",
+                    Amount = fnbRevenue,
+                    Percentage = ToPercentage(fnbRevenue)
+                },
+                new()
+                {
+                    Label = "Huấn luyện viên",
+                    Amount = coachingRevenue,
+                    Percentage = ToPercentage(coachingRevenue)
+                }
+            };
+        }
+
+        private static List<AdminRevenueSourceResponse> BuildEmptyRevenueBySource()
+        {
+            return new List<AdminRevenueSourceResponse>
+            {
+                new() { Label = "Tiền giờ chơi", Amount = 0, Percentage = 0 },
+                new() { Label = "Dịch vụ F&B", Amount = 0, Percentage = 0 },
+                new() { Label = "Huấn luyện viên", Amount = 0, Percentage = 0 }
+            };
         }
 
         private async Task<List<AdminRevenuePointResponse>> BuildRevenueSeriesAsync(string period, DateTime? from = null, DateTime? to = null)

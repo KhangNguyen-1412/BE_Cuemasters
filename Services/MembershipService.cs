@@ -34,13 +34,13 @@ namespace BilliardsBooking.API.Services
                 .Select(m => new MembershipPlanResponse
                 {
                     Id = m.Id,
+                    Tier = m.Tier.ToString(),
                     Name = m.Name,
-                    Description = m.Tier.ToString() + " Membership",
-                    PricePerMonth = m.MonthlyPrice,
-                    DurationMonths = 1,
+                    MonthlyPrice = m.MonthlyPrice,
                     TableDiscountPercent = m.TableDiscountPercent,
-                    FnBDiscountPercent = 0,
-                    FreeCoachingHours = m.FreeCoachingSessionsPerMonth,
+                    PriorityBooking = m.PriorityBooking,
+                    FreeCoachingSessionsPerMonth = m.FreeCoachingSessionsPerMonth,
+                    MaxAdvanceBookingDays = m.MaxAdvanceBookingDays,
                     IsActive = m.IsActive
                 })
                 .ToListAsync();
@@ -58,12 +58,18 @@ namespace BilliardsBooking.API.Services
                     Id = userMem.Id.ToString(),
                     UserId = userMem.UserId.ToString(),
                     PlanId = userMem.MembershipPlanId,
+                    Tier = userMem.MembershipPlan!.Tier.ToString(),
                     PlanName = userMem.MembershipPlan!.Name,
+                    MonthlyPrice = userMem.MembershipPlan.MonthlyPrice,
+                    TableDiscountPercent = userMem.MembershipPlan.TableDiscountPercent,
+                    PriorityBooking = userMem.MembershipPlan.PriorityBooking,
+                    FreeCoachingSessionsPerMonth = userMem.MembershipPlan.FreeCoachingSessionsPerMonth,
+                    MaxAdvanceBookingDays = userMem.MembershipPlan.MaxAdvanceBookingDays,
                     StartDate = userMem.StartDate,
                     EndDate = userMem.EndDate,
                     AutoRenew = userMem.AutoRenew,
                     Status = userMem.IsActive ? "Active" : "Expired",
-                    UsedCoachingHours = 0
+                    UsedFreeCoachingSessions = 0
             };
         }
 
@@ -97,6 +103,7 @@ namespace BilliardsBooking.API.Services
             {
                 Id = Guid.NewGuid(),
                 UserId = userId,
+                UserMembershipId = newMembership.Id,
                 Amount = plan.MonthlyPrice,
                 Method = PaymentMethod.Cash,
                 Status = PaymentStatus.Completed,

@@ -66,21 +66,52 @@ namespace BilliardsBooking.API.Data
             // 2. Create Membership Plans
             var plans = new List<MembershipPlan>
             {
-                new MembershipPlan { Tier = MembershipTier.Free, Name = "Basic Player", MonthlyPrice = 0, TableDiscountPercent = 0, PriorityBooking = false, FreeCoachingSessionsPerMonth = 0 },
-                new MembershipPlan { Tier = MembershipTier.Silver, Name = "Cue Enthusiast", MonthlyPrice = 200000, TableDiscountPercent = 10, PriorityBooking = true, FreeCoachingSessionsPerMonth = 1 },
-                new MembershipPlan { Tier = MembershipTier.Gold, Name = "Master Club", MonthlyPrice = 500000, TableDiscountPercent = 20, PriorityBooking = true, FreeCoachingSessionsPerMonth = 3 }
+                new MembershipPlan { Tier = MembershipTier.Free, Name = "Basic Player", MonthlyPrice = 0, TableDiscountPercent = 0, PriorityBooking = false, FreeCoachingSessionsPerMonth = 0, MaxAdvanceBookingDays = 0 },
+                new MembershipPlan { Tier = MembershipTier.Silver, Name = "Cue Enthusiast", MonthlyPrice = 200000, TableDiscountPercent = 10, PriorityBooking = true, FreeCoachingSessionsPerMonth = 1, MaxAdvanceBookingDays = 1 },
+                new MembershipPlan { Tier = MembershipTier.Gold, Name = "Master Club", MonthlyPrice = 500000, TableDiscountPercent = 20, PriorityBooking = true, FreeCoachingSessionsPerMonth = 3, MaxAdvanceBookingDays = 3 }
             };
             context.MembershipPlans.AddRange(plans);
 
-            // 3. Create Tables
-            var tables = new List<BilliardTable>
+            // 3. Create Tables — enough per category to make the walk-in buffer meaningful.
+            //    Buffer constant (BookingService.WalkInBufferPerCategory = 2) reserves 2 tables per
+            //    category for walk-ins, so online concurrent reservations are capped at (total - 2).
+            //    Pool:    10 tables → 8 concurrent online per 30-min slot
+            //    Snooker:  6 tables → 4 concurrent online per 30-min slot
+            //    Carom:    4 tables → 2 concurrent online per 30-min slot
+            var tables = new List<BilliardTable>();
+            for (int p = 1; p <= 10; p++)
             {
-                new BilliardTable { TableNumber = "T01", Type = TableType.Pool, HourlyRate = 80000, PositionX = 20, PositionY = 30 },
-                new BilliardTable { TableNumber = "T02", Type = TableType.Pool, HourlyRate = 80000, PositionX = 40, PositionY = 30 },
-                new BilliardTable { TableNumber = "T03", Type = TableType.Snooker, HourlyRate = 100000, PositionX = 60, PositionY = 30 },
-                new BilliardTable { TableNumber = "T04", Type = TableType.Carom, HourlyRate = 120000, PositionX = 20, PositionY = 60 },
-                new BilliardTable { TableNumber = "T05", Type = TableType.Pool, HourlyRate = 80000, PositionX = 40, PositionY = 60, Status = TableManualStatus.Maintenance }
-            };
+                tables.Add(new BilliardTable
+                {
+                    TableNumber = $"P{p:D2}",
+                    Type = TableType.Pool,
+                    HourlyRate = 80000,
+                    PositionX = 20 + (p - 1) % 5 * 20,
+                    PositionY = 20 + (p - 1) / 5 * 30
+                });
+            }
+            for (int s = 1; s <= 6; s++)
+            {
+                tables.Add(new BilliardTable
+                {
+                    TableNumber = $"S{s:D2}",
+                    Type = TableType.Snooker,
+                    HourlyRate = 100000,
+                    PositionX = 20 + (s - 1) % 3 * 30,
+                    PositionY = 90 + (s - 1) / 3 * 30
+                });
+            }
+            for (int c = 1; c <= 4; c++)
+            {
+                tables.Add(new BilliardTable
+                {
+                    TableNumber = $"C{c:D2}",
+                    Type = TableType.Carom,
+                    HourlyRate = 120000,
+                    PositionX = 20 + (c - 1) % 2 * 40,
+                    PositionY = 160 + (c - 1) / 2 * 30
+                });
+            }
             context.Tables.AddRange(tables);
 
             // 4. Create Food and Beverages

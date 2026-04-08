@@ -36,6 +36,7 @@ namespace BilliardsBooking.API.Controllers.Admin
                     TableDiscountPercent = p.TableDiscountPercent,
                     PriorityBooking = p.PriorityBooking,
                     FreeCoachingSessionsPerMonth = p.FreeCoachingSessionsPerMonth,
+                    MaxAdvanceBookingDays = p.MaxAdvanceBookingDays,
                     IsActive = p.IsActive,
                     ActiveSubscribers = _context.UserMemberships.Count(um => um.MembershipPlanId == p.Id && um.IsActive)
                 })
@@ -58,6 +59,7 @@ namespace BilliardsBooking.API.Controllers.Admin
                     TableDiscountPercent = p.TableDiscountPercent,
                     PriorityBooking = p.PriorityBooking,
                     FreeCoachingSessionsPerMonth = p.FreeCoachingSessionsPerMonth,
+                    MaxAdvanceBookingDays = p.MaxAdvanceBookingDays,
                     IsActive = p.IsActive,
                     ActiveSubscribers = _context.UserMemberships.Count(um => um.MembershipPlanId == p.Id && um.IsActive)
                 })
@@ -84,6 +86,7 @@ namespace BilliardsBooking.API.Controllers.Admin
                 TableDiscountPercent = request.TableDiscountPercent,
                 PriorityBooking = request.PriorityBooking,
                 FreeCoachingSessionsPerMonth = request.FreeCoachingSessionsPerMonth,
+                MaxAdvanceBookingDays = request.MaxAdvanceBookingDays,
                 IsActive = request.IsActive
             };
 
@@ -110,6 +113,7 @@ namespace BilliardsBooking.API.Controllers.Admin
             plan.TableDiscountPercent = request.TableDiscountPercent;
             plan.PriorityBooking = request.PriorityBooking;
             plan.FreeCoachingSessionsPerMonth = request.FreeCoachingSessionsPerMonth;
+            plan.MaxAdvanceBookingDays = request.MaxAdvanceBookingDays;
             plan.IsActive = request.IsActive;
 
             await _context.SaveChangesAsync();

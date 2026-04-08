@@ -208,12 +208,14 @@ namespace BilliardsBooking.API.Controllers.Admin
         private async Task<HashSet<Guid>> GetBusyCoachIdsAsync()
         {
             var now = DateTime.UtcNow;
+            var today = now.Date;
+            var nowTime = now.TimeOfDay;
             return await _context.CoachingSessions
                 .Where(session =>
                     !session.IsCompleted &&
-                    session.SessionDate == now.Date &&
-                    session.StartTime <= now.TimeOfDay &&
-                    session.EndTime > now.TimeOfDay)
+                    session.SessionDate == today &&
+                    session.StartTime <= nowTime &&
+                    session.EndTime > nowTime)
                 .Select(session => session.CoachId)
                 .ToHashSetAsync();
         }

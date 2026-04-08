@@ -4,6 +4,7 @@ using BilliardsBooking.API.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BilliardsBooking.API.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260407170908_OverhaulBookingPolicy")]
+    partial class OverhaulBookingPolicy
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -66,9 +69,6 @@ namespace BilliardsBooking.API.Data.Migrations
                     b.Property<decimal?>("ActualCost")
                         .HasColumnType("decimal(18,2)");
 
-                    b.Property<DateTime?>("AssignedAt")
-                        .HasColumnType("datetime2");
-
                     b.Property<DateTime>("BookingDate")
                         .HasColumnType("datetime2");
 
@@ -102,9 +102,6 @@ namespace BilliardsBooking.API.Data.Migrations
                     b.Property<string>("GuestName")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<int>("RequestedTableType")
-                        .HasColumnType("int");
-
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
@@ -116,7 +113,7 @@ namespace BilliardsBooking.API.Data.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
-                    b.Property<int?>("TableId")
+                    b.Property<int>("TableId")
                         .HasColumnType("int");
 
                     b.Property<decimal>("TotalTableCost")
@@ -150,25 +147,22 @@ namespace BilliardsBooking.API.Data.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
 
-                    b.Property<int>("RequestedTableType")
-                        .HasColumnType("int");
-
                     b.Property<DateTime>("SlotDate")
                         .HasColumnType("datetime2");
 
                     b.Property<TimeSpan>("SlotStart")
                         .HasColumnType("time");
 
-                    b.Property<int?>("TableId")
+                    b.Property<int>("TableId")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
 
                     b.HasIndex("BookingId");
 
-                    b.HasIndex("TableId");
-
-                    b.HasIndex("RequestedTableType", "SlotDate", "SlotStart", "IsActive");
+                    b.HasIndex("TableId", "SlotDate", "SlotStart")
+                        .IsUnique()
+                        .HasFilter("[IsActive] = 1");
 
                     b.ToTable("BookingSlots");
                 });
@@ -253,9 +247,6 @@ namespace BilliardsBooking.API.Data.Migrations
                     b.Property<Guid?>("BookingId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<DateTime?>("CancelledAt")
-                        .HasColumnType("datetime2");
-
                     b.Property<Guid>("CoachId")
                         .HasColumnType("uniqueidentifier");
 
@@ -265,9 +256,6 @@ namespace BilliardsBooking.API.Data.Migrations
                     b.Property<decimal>("Cost")
                         .HasColumnType("decimal(18,2)");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
                     b.Property<TimeSpan>("EndTime")
                         .HasColumnType("time");
 
@@ -276,9 +264,6 @@ namespace BilliardsBooking.API.Data.Migrations
 
                     b.Property<bool>("IsGroupSession")
                         .HasColumnType("bit");
-
-                    b.Property<DateTime?>("LinkedAt")
-                        .HasColumnType("datetime2");
 
                     b.Property<int>("MaxParticipants")
                         .HasColumnType("int");
@@ -300,7 +285,7 @@ namespace BilliardsBooking.API.Data.Migrations
 
                     b.HasIndex("CoachId", "SessionDate", "StartTime")
                         .IsUnique()
-                        .HasFilter("[CancelledAt] IS NULL");
+                        .HasFilter("[IsCompleted] = 0");
 
                     b.ToTable("CoachingSessions");
                 });
@@ -568,7 +553,8 @@ namespace BilliardsBooking.API.Data.Migrations
                     b.HasOne("BilliardsBooking.API.Models.BilliardTable", "Table")
                         .WithMany("Bookings")
                         .HasForeignKey("TableId")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.HasOne("BilliardsBooking.API.Models.User", "User")
                         .WithMany()
@@ -590,7 +576,8 @@ namespace BilliardsBooking.API.Data.Migrations
                     b.HasOne("BilliardsBooking.API.Models.BilliardTable", "Table")
                         .WithMany()
                         .HasForeignKey("TableId")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("Booking");
 
@@ -623,8 +610,7 @@ namespace BilliardsBooking.API.Data.Migrations
                 {
                     b.HasOne("BilliardsBooking.API.Models.Booking", "Booking")
                         .WithMany()
-                        .HasForeignKey("BookingId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .HasForeignKey("BookingId");
 
                     b.HasOne("BilliardsBooking.API.Models.Coach", "Coach")
                         .WithMany("Sessions")

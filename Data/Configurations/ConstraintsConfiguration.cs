@@ -8,11 +8,11 @@ namespace BilliardsBooking.API.Data.Configurations
     {
         public void Configure(EntityTypeBuilder<CoachingSession> builder)
         {
-            // Protect against Double Booking for Coaches
-            // Note: If CancelledAt or IsActive was on CoachingSession we would filter it here
+            // Prevent two active sessions for the same coach at the same start time.
+            // Filter on CancelledAt (null = active) since sessions are no longer auto-completed at creation.
             builder.HasIndex(cs => new { cs.CoachId, cs.SessionDate, cs.StartTime })
                    .IsUnique()
-                   .HasFilter("[IsCompleted] = 0"); // A proxy for an active session to prevent overlapping bookings
+                   .HasFilter("[CancelledAt] IS NULL");
 
             builder.HasOne(cs => cs.StudentUser)
                    .WithMany()
@@ -23,6 +23,13 @@ namespace BilliardsBooking.API.Data.Configurations
                    .WithMany(c => c.Sessions)
                    .HasForeignKey(cs => cs.CoachId)
                    .OnDelete(DeleteBehavior.Restrict);
+
+            // BookingId is nullable (sessions are independent at creation, linked later at checkout).
+            builder.HasOne(cs => cs.Booking)
+                   .WithMany()
+                   .HasForeignKey(cs => cs.BookingId)
+                   .OnDelete(DeleteBehavior.SetNull)
+                   .IsRequired(false);
         }
     }
 

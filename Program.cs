@@ -4,10 +4,16 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.Security.Claims;
+using System.Text.Json.Serialization;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(
+            new JsonStringEnumConverter(allowIntegerValues: false));
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddSignalR();
@@ -21,12 +27,16 @@ builder.Services.AddScoped<BilliardsBooking.API.Services.IFnBService, BilliardsB
 builder.Services.AddScoped<BilliardsBooking.API.Services.IMembershipService, BilliardsBooking.API.Services.MembershipService>();
 builder.Services.AddScoped<BilliardsBooking.API.Services.IPaymentService, BilliardsBooking.API.Services.PaymentService>();
 
+// Background Services
+builder.Services.AddHostedService<BilliardsBooking.API.Services.NoShowWorker>();
+
 // Configure CORS
+var allowedOrigins = builder.Configuration.GetValue<string>("Cors:AllowedOrigins") ?? "http://localhost:5173,http://localhost:3000";
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("ReactApp", policy =>
     {
-        policy.WithOrigins("http://localhost:5173", "http://localhost:3000")
+        policy.WithOrigins(allowedOrigins.Split(','))
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -68,11 +78,11 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+    app.UseHttpsRedirection();
 }
 
 app.UseCors("ReactApp");
 
-app.UseHttpsRedirection();
 
 app.UseAuthentication();
 app.UseAuthorization();
