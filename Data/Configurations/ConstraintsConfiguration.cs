@@ -24,10 +24,9 @@ namespace BilliardsBooking.API.Data.Configurations
                    .HasForeignKey(cs => cs.CoachId)
                    .OnDelete(DeleteBehavior.Restrict);
 
-            // BookingId is nullable (sessions are independent at creation, linked later at checkout).
-            builder.HasOne(cs => cs.Booking)
-                   .WithMany()
-                   .HasForeignKey(cs => cs.BookingId)
+            builder.HasOne(cs => cs.TableSession)
+                   .WithMany(ts => ts.CoachingSessions)
+                   .HasForeignKey(cs => cs.TableSessionId)
                    .OnDelete(DeleteBehavior.SetNull)
                    .IsRequired(false);
         }

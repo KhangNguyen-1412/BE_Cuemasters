@@ -18,8 +18,8 @@ namespace BilliardsBooking.API.Models
     {
         public Guid Id { get; set; }
 
-        public Guid BookingId { get; set; }
-        public Booking? Booking { get; set; }
+        public Guid TableSessionId { get; set; }
+        public TableSession? TableSession { get; set; }
 
         public decimal TotalAmount { get; set; }
 

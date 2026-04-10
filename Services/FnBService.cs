@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using BilliardsBooking.API.Data;
 using BilliardsBooking.API.DTOs;
+using BilliardsBooking.API.Enums;
 using BilliardsBooking.API.Models;
 
 namespace BilliardsBooking.API.Services
@@ -42,13 +43,19 @@ namespace BilliardsBooking.API.Services
 
         public async Task<FnBOrderResponse?> CreateFnBOrderAsync(Guid bookingId, List<int> itemIds)
         {
-            var booking = await _context.Bookings.FindAsync(bookingId);
-            if (booking == null) return null;
+            var session = await _context.TableSessions.FirstOrDefaultAsync(s => s.Id == bookingId);
+            if (session == null)
+            {
+                session = await _context.TableSessions
+                    .FirstOrDefaultAsync(s => s.ReservationId == bookingId);
+            }
+
+            if (session == null || session.Status != TableSessionStatus.Active) return null;
 
             var fnbOrder = new FnBOrder
             {
                 Id = Guid.NewGuid(),
-                BookingId = bookingId,
+                TableSessionId = session.Id,
                 TotalAmount = 0
             };
 
@@ -78,8 +85,6 @@ namespace BilliardsBooking.API.Services
             }
 
             fnbOrder.TotalAmount = totalAmount;
-            booking.TotalTableCost += totalAmount; // Update booking grand total
-            
             await _context.SaveChangesAsync();
 
             return new FnBOrderResponse

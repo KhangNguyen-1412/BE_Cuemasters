@@ -21,6 +21,10 @@ builder.Services.AddSignalR();
 // DI Services
 builder.Services.AddScoped<BilliardsBooking.API.Services.IAuthService, BilliardsBooking.API.Services.AuthService>();
 builder.Services.AddScoped<BilliardsBooking.API.Services.IBookingService, BilliardsBooking.API.Services.BookingService>();
+builder.Services.AddScoped<BilliardsBooking.API.Services.IReservationService, BilliardsBooking.API.Services.ReservationService>();
+builder.Services.AddScoped<BilliardsBooking.API.Services.ITableSessionService, BilliardsBooking.API.Services.TableSessionService>();
+builder.Services.AddScoped<BilliardsBooking.API.Services.IInvoiceService, BilliardsBooking.API.Services.InvoiceService>();
+builder.Services.AddScoped<BilliardsBooking.API.Services.IAuditService, BilliardsBooking.API.Services.AuditService>();
 builder.Services.AddScoped<BilliardsBooking.API.Services.ITableService, BilliardsBooking.API.Services.TableService>();
 builder.Services.AddScoped<BilliardsBooking.API.Services.ICoachService, BilliardsBooking.API.Services.CoachService>();
 builder.Services.AddScoped<BilliardsBooking.API.Services.IFnBService, BilliardsBooking.API.Services.FnBService>();

@@ -1,4 +1,3 @@
-using System.Threading.Tasks;
 using BilliardsBooking.API.Data;
 using BilliardsBooking.API.DTOs;
 using BilliardsBooking.API.Enums;
@@ -24,34 +23,37 @@ namespace BilliardsBooking.API.Controllers.Admin
         public async Task<ActionResult<AdminDashboardStatsResponse>> GetStats([FromQuery] DateTime? from = null, [FromQuery] DateTime? to = null)
         {
             var paymentQuery = _context.Payments.Where(p => p.Status == PaymentStatus.Completed);
-            if (from.HasValue) paymentQuery = paymentQuery.Where(p => p.CreatedAt >= from.Value);
-            if (to.HasValue) paymentQuery = paymentQuery.Where(p => p.CreatedAt <= to.Value);
+            if (from.HasValue) paymentQuery = paymentQuery.Where(p => (p.CompletedAt ?? p.CreatedAt) >= from.Value);
+            if (to.HasValue) paymentQuery = paymentQuery.Where(p => (p.CompletedAt ?? p.CreatedAt) <= to.Value);
             var totalRevenue = await paymentQuery.SumAsync(p => p.Amount);
 
-            var activeSessions = await _context.Bookings
-                .Where(b => b.Status == BookingStatus.InProgress || b.Status == BookingStatus.Confirmed)
-                .CountAsync();
+            var activeSessions = await _context.TableSessions.CountAsync(s => s.Status == TableSessionStatus.Active);
 
-            var bookingQuery = _context.Bookings.AsQueryable();
-            if (from.HasValue) bookingQuery = bookingQuery.Where(b => b.CreatedAt >= from.Value);
-            if (to.HasValue) bookingQuery = bookingQuery.Where(b => b.CreatedAt <= to.Value);
-            var totalBookings = await bookingQuery.CountAsync();
-            var availableTables = await _context.Tables
-                .Where(t => t.IsActive && t.Status == TableManualStatus.Available)
-                .CountAsync();
+            var reservationQuery = _context.Reservations.AsQueryable();
+            if (from.HasValue) reservationQuery = reservationQuery.Where(r => r.CreatedAt >= from.Value);
+            if (to.HasValue) reservationQuery = reservationQuery.Where(r => r.CreatedAt <= to.Value);
+
+            var walkInQuery = _context.TableSessions.Where(s => s.Type == SessionType.WalkIn);
+            if (from.HasValue) walkInQuery = walkInQuery.Where(s => s.CreatedAt >= from.Value);
+            if (to.HasValue) walkInQuery = walkInQuery.Where(s => s.CreatedAt <= to.Value);
+
+            var totalBookings = await reservationQuery.CountAsync() + await walkInQuery.CountAsync();
+            var availableTables = await _context.Tables.CountAsync(t =>
+                t.IsActive &&
+                t.Status == TableManualStatus.Available &&
+                t.RealTimeStatus != TableRealTimeStatus.Occupied);
             var totalTables = await _context.Tables.CountAsync(t => t.IsActive);
             var activeCoaches = await _context.Coaches.CountAsync(c => c.IsActive);
             var menuItems = await _context.FnBMenuItems.CountAsync();
             var activeMemberships = await _context.UserMemberships.CountAsync(m => m.IsActive);
 
-            // No-show KPIs
             var today = DateTime.UtcNow.Date;
-            var noShowsToday = await _context.Bookings
-                .Where(b => b.Status == BookingStatus.NoShow && b.BookingDate.Date == today)
-                .CountAsync();
-            var forfeitedDepositsToday = await _context.Bookings
-                .Where(b => b.Status == BookingStatus.NoShow && b.DepositForfeited && b.BookingDate.Date == today)
-                .SumAsync(b => b.DepositAmount);
+            var noShowsToday = await _context.Reservations.CountAsync(r => r.Status == ReservationStatus.NoShow && r.BookingDate.Date == today);
+            var forfeitedDepositsToday = await _context.Payments
+                .Where(p => p.Type == PaymentType.ForfeitAdjustment &&
+                            p.Status == PaymentStatus.Completed &&
+                            (p.CompletedAt ?? p.CreatedAt).Date == today)
+                .SumAsync(p => p.Amount);
 
             return Ok(new AdminDashboardStatsResponse
             {

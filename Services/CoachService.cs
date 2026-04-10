@@ -151,7 +151,7 @@ namespace BilliardsBooking.API.Services
                 SessionDate = request.SessionDate.Date,
                 StartTime = startTime,
                 EndTime = endTime,
-                BookingId = null,
+                TableSessionId = null,
                 Cost = coach.HourlyRate * durationHours,
                 IsCompleted = false
             };

@@ -11,11 +11,13 @@ namespace BilliardsBooking.API.Models
         public TableType Type { get; set; }
         public decimal HourlyRate { get; set; }
         public TableManualStatus Status { get; set; } = TableManualStatus.Available;
+        public TableRealTimeStatus RealTimeStatus { get; set; } = TableRealTimeStatus.Available;
         public double? PositionX { get; set; }
         public double? PositionY { get; set; }
         public bool IsActive { get; set; } = true;
 
         public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
+        public ICollection<TableSession> TableSessions { get; set; } = new List<TableSession>();
     }
 
     public class Booking

@@ -104,11 +104,13 @@ namespace BilliardsBooking.API.Services
                 Id = Guid.NewGuid(),
                 UserId = userId,
                 UserMembershipId = newMembership.Id,
+                Type = PaymentType.MembershipPurchase,
                 Amount = plan.MonthlyPrice,
                 Method = PaymentMethod.Cash,
                 Status = PaymentStatus.Completed,
-                CreatedAt = DateTime.UtcNow
-                // No BookingId, it's a membership payment
+                CreatedAt = DateTime.UtcNow,
+                CompletedAt = DateTime.UtcNow,
+                Notes = "Membership purchase"
             };
 
             _context.UserMemberships.Add(newMembership);

@@ -1,11 +1,6 @@
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
-using System.Threading.Tasks;
 using BilliardsBooking.API.Data;
 using BilliardsBooking.API.DTOs;
-using BilliardsBooking.API.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -25,11 +20,24 @@ namespace BilliardsBooking.API.Controllers.Admin
         }
 
         [HttpGet]
-        public async Task<ActionResult<AdminAnalyticsResponse>> GetAnalytics([FromQuery] string period = "month", [FromQuery] DateTime? from = null, [FromQuery] DateTime? to = null)
+        public async Task<ActionResult<AdminAnalyticsResponse>> GetAnalytics(
+            [FromQuery] string period = "month",
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null,
+            [FromQuery] string basis = "service")
         {
             var normalizedPeriod = NormalizePeriod(period);
-            var revenueByPeriod = await BuildRevenueSeriesAsync(normalizedPeriod, from, to);
-            var revenueBySource = await BuildRevenueBySourceAsync(from, to);
+            var normalizedBasis = NormalizeBasis(basis);
+
+            var invoiceQuery = normalizedBasis == "payment"
+                ? QueryByPaymentDate(from, to)
+                : QueryByServiceDate(from, to);
+
+            var invoices = await invoiceQuery.ToListAsync();
+            var sessions = await _context.TableSessions.Select(s => s.StartedAt).ToListAsync();
+
+            var revenueByPeriod = BuildRevenueSeries(normalizedPeriod, invoices, sessions);
+            var revenueBySource = BuildRevenueBySource(invoices);
 
             var totalTables = await _context.Tables.CountAsync(t => t.IsActive);
             var heatmap = await BuildOccupancyHeatmapAsync(totalTables);
@@ -38,6 +46,7 @@ namespace BilliardsBooking.API.Controllers.Admin
             return Ok(new AdminAnalyticsResponse
             {
                 Period = normalizedPeriod,
+                Basis = normalizedBasis,
                 RevenueByPeriod = revenueByPeriod,
                 RevenueBySource = revenueBySource,
                 OccupancyHeatmap = heatmap,
@@ -47,123 +56,55 @@ namespace BilliardsBooking.API.Controllers.Admin
             });
         }
 
-        private async Task<List<AdminRevenueSourceResponse>> BuildRevenueBySourceAsync(DateTime? from = null, DateTime? to = null)
+        private IQueryable<Models.Invoice> QueryByServiceDate(DateTime? from, DateTime? to)
         {
-            var paymentQuery = _context.Payments
-                .Where(payment => payment.Status == PaymentStatus.Completed && payment.BookingId.HasValue);
+            var query = _context.Invoices.AsQueryable();
+            if (from.HasValue) query = query.Where(i => i.ServiceDate >= from.Value.Date);
+            if (to.HasValue) query = query.Where(i => i.ServiceDate <= to.Value.Date);
+            return query;
+        }
 
-            if (from.HasValue)
-            {
-                paymentQuery = paymentQuery.Where(payment => payment.CreatedAt >= from.Value);
-            }
+        private IQueryable<Models.Invoice> QueryByPaymentDate(DateTime? from, DateTime? to)
+        {
+            var query = _context.Invoices.Where(i => i.PaymentCompletedAt != null);
+            if (from.HasValue) query = query.Where(i => i.PaymentCompletedAt >= from.Value);
+            if (to.HasValue) query = query.Where(i => i.PaymentCompletedAt <= to.Value);
+            return query;
+        }
 
-            if (to.HasValue)
-            {
-                paymentQuery = paymentQuery.Where(payment => payment.CreatedAt <= to.Value);
-            }
-
-            var bookingIds = await paymentQuery
-                .Select(payment => payment.BookingId!.Value)
-                .Distinct()
-                .ToListAsync();
-
-            if (bookingIds.Count == 0)
-            {
-                return BuildEmptyRevenueBySource();
-            }
-
-            var tableRevenue = await _context.Bookings
-                .Where(booking => bookingIds.Contains(booking.Id))
-                .Select(booking => booking.TotalTableCost)
-                .DefaultIfEmpty(0)
-                .SumAsync();
-
-            var fnbRevenue = await _context.FnBOrders
-                .Where(order => bookingIds.Contains(order.BookingId))
-                .Select(order => order.TotalAmount)
-                .DefaultIfEmpty(0)
-                .SumAsync();
-
-            var coachingRevenue = await _context.CoachingSessions
-                .Where(session => session.BookingId.HasValue && bookingIds.Contains(session.BookingId.Value))
-                .Select(session => session.Cost)
-                .DefaultIfEmpty(0)
-                .SumAsync();
-
+        private static List<AdminRevenueSourceResponse> BuildRevenueBySource(List<Models.Invoice> invoices)
+        {
+            var tableRevenue = invoices.Sum(i => i.TableTimeCost);
+            var fnbRevenue = invoices.Sum(i => i.FnBTotal);
+            var coachingRevenue = invoices.Sum(i => i.CoachingTotal);
             var total = tableRevenue + fnbRevenue + coachingRevenue;
 
-            decimal ToPercentage(decimal amount)
-            {
-                if (total <= 0)
-                {
-                    return 0;
-                }
-
-                return Math.Round((amount / total) * 100m, 2);
-            }
+            decimal ToPercentage(decimal amount) => total <= 0 ? 0 : Math.Round((amount / total) * 100m, 2);
 
             return new List<AdminRevenueSourceResponse>
             {
-                new()
-                {
-                    Label = "Tiền giờ chơi",
-                    Amount = tableRevenue,
-                    Percentage = ToPercentage(tableRevenue)
-                },
-                new()
-                {
-                    Label = "Dịch vụ F&B",
-                    Amount = fnbRevenue,
-                    Percentage = ToPercentage(fnbRevenue)
-                },
-                new()
-                {
-                    Label = "Huấn luyện viên",
-                    Amount = coachingRevenue,
-                    Percentage = ToPercentage(coachingRevenue)
-                }
+                new() { Label = "Tiền giờ chơi", Amount = tableRevenue, Percentage = ToPercentage(tableRevenue) },
+                new() { Label = "Dịch vụ F&B", Amount = fnbRevenue, Percentage = ToPercentage(fnbRevenue) },
+                new() { Label = "Huấn luyện viên", Amount = coachingRevenue, Percentage = ToPercentage(coachingRevenue) }
             };
         }
 
-        private static List<AdminRevenueSourceResponse> BuildEmptyRevenueBySource()
-        {
-            return new List<AdminRevenueSourceResponse>
-            {
-                new() { Label = "Tiền giờ chơi", Amount = 0, Percentage = 0 },
-                new() { Label = "Dịch vụ F&B", Amount = 0, Percentage = 0 },
-                new() { Label = "Huấn luyện viên", Amount = 0, Percentage = 0 }
-            };
-        }
-
-        private async Task<List<AdminRevenuePointResponse>> BuildRevenueSeriesAsync(string period, DateTime? from = null, DateTime? to = null)
+        private static List<AdminRevenuePointResponse> BuildRevenueSeries(string period, List<Models.Invoice> invoices, List<DateTime> sessions)
         {
             var now = DateTime.UtcNow;
-            var paymentQuery = _context.Payments.Where(payment => payment.Status == PaymentStatus.Completed);
-            if (from.HasValue) paymentQuery = paymentQuery.Where(p => p.CreatedAt >= from.Value);
-            if (to.HasValue) paymentQuery = paymentQuery.Where(p => p.CreatedAt <= to.Value);
-            var completedPayments = await paymentQuery.Select(payment => new { payment.CreatedAt, payment.Amount }).ToListAsync();
-
-            var bQuery = _context.Bookings.Where(booking => booking.Status != BookingStatus.Cancelled);
-            if (from.HasValue) bQuery = bQuery.Where(b => b.CreatedAt >= from.Value);
-            if (to.HasValue) bQuery = bQuery.Where(b => b.CreatedAt <= to.Value);
-            var bookingStarts = await bQuery.Select(booking => new { StartsAt = booking.BookingDate.Add(booking.StartTime) }).ToListAsync();
-
             var points = new List<AdminRevenuePointResponse>();
 
             if (period == "week")
             {
                 var weekStart = now.Date.AddDays(-6);
-
                 for (var offset = 0; offset < 7; offset++)
                 {
                     var day = weekStart.AddDays(offset);
                     points.Add(new AdminRevenuePointResponse
                     {
                         Label = day.ToString("dd MMM", CultureInfo.InvariantCulture),
-                        Revenue = completedPayments
-                            .Where(payment => payment.CreatedAt.Date == day.Date)
-                            .Sum(payment => payment.Amount),
-                        BookingCount = bookingStarts.Count(booking => booking.StartsAt.Date == day.Date)
+                        Revenue = invoices.Where(i => i.ServiceDate.Date == day.Date || i.PaymentCompletedAt?.Date == day.Date).Sum(i => i.GrandTotal),
+                        BookingCount = sessions.Count(start => start.Date == day.Date)
                     });
                 }
 
@@ -173,19 +114,18 @@ namespace BilliardsBooking.API.Controllers.Admin
             if (period == "day")
             {
                 var dayStart = now.Date;
-
                 for (var hour = 0; hour < 24; hour += 2)
                 {
                     var bucketStart = dayStart.AddHours(hour);
                     var bucketEnd = bucketStart.AddHours(2);
-
                     points.Add(new AdminRevenuePointResponse
                     {
                         Label = bucketStart.ToString("HH:mm", CultureInfo.InvariantCulture),
-                        Revenue = completedPayments
-                            .Where(payment => payment.CreatedAt >= bucketStart && payment.CreatedAt < bucketEnd)
-                            .Sum(payment => payment.Amount),
-                        BookingCount = bookingStarts.Count(booking => booking.StartsAt >= bucketStart && booking.StartsAt < bucketEnd)
+                        Revenue = invoices.Where(i =>
+                                (i.PaymentCompletedAt >= bucketStart && i.PaymentCompletedAt < bucketEnd) ||
+                                (i.ServiceStartedAt >= bucketStart && i.ServiceStartedAt < bucketEnd))
+                            .Sum(i => i.GrandTotal),
+                        BookingCount = sessions.Count(start => start >= bucketStart && start < bucketEnd)
                     });
                 }
 
@@ -193,19 +133,18 @@ namespace BilliardsBooking.API.Controllers.Admin
             }
 
             var monthStart = new DateTime(now.Year, now.Month, 1).AddMonths(-11);
-
             for (var offset = 0; offset < 12; offset++)
             {
                 var currentMonth = monthStart.AddMonths(offset);
                 var nextMonth = currentMonth.AddMonths(1);
-
                 points.Add(new AdminRevenuePointResponse
                 {
                     Label = currentMonth.ToString("MMM yy", CultureInfo.InvariantCulture),
-                    Revenue = completedPayments
-                        .Where(payment => payment.CreatedAt >= currentMonth && payment.CreatedAt < nextMonth)
-                        .Sum(payment => payment.Amount),
-                    BookingCount = bookingStarts.Count(booking => booking.StartsAt >= currentMonth && booking.StartsAt < nextMonth)
+                    Revenue = invoices.Where(i =>
+                            (i.PaymentCompletedAt >= currentMonth && i.PaymentCompletedAt < nextMonth) ||
+                            (i.ServiceDate >= currentMonth && i.ServiceDate < nextMonth))
+                        .Sum(i => i.GrandTotal),
+                    BookingCount = sessions.Count(start => start >= currentMonth && start < nextMonth)
                 });
             }
 
@@ -216,7 +155,7 @@ namespace BilliardsBooking.API.Controllers.Admin
         {
             var analysisStart = DateTime.UtcNow.Date.AddDays(-27);
 
-            var slots = await _context.BookingSlots
+            var slots = await _context.ReservationSlots
                 .Where(slot => slot.IsActive && slot.SlotDate >= analysisStart)
                 .Select(slot => new { slot.SlotDate, slot.SlotStart })
                 .ToListAsync();
@@ -226,16 +165,12 @@ namespace BilliardsBooking.API.Controllers.Admin
                 .ToDictionary(group => (group.Key.DayOfWeek, group.Key.Hour), group => group.Count());
 
             var heatmap = new List<AdminHeatmapCellResponse>();
-
             for (var day = 0; day < 7; day++)
             {
                 for (var hour = 0; hour < 24; hour++)
                 {
                     groupedCounts.TryGetValue((day, hour), out var bookingCount);
-                    var occupancyRate = totalTables == 0
-                        ? 0
-                        : Math.Round((decimal)bookingCount / (totalTables * 2m) * 100m, 2);
-
+                    var occupancyRate = totalTables == 0 ? 0 : Math.Round((decimal)bookingCount / (totalTables * 2m) * 100m, 2);
                     heatmap.Add(new AdminHeatmapCellResponse
                     {
                         DayOfWeek = day,
@@ -256,10 +191,7 @@ namespace BilliardsBooking.API.Controllers.Admin
                 .Select(group =>
                 {
                     var bookingCount = group.Sum(cell => cell.BookingCount);
-                    var occupancyRate = totalTables == 0
-                        ? 0
-                        : Math.Round((decimal)bookingCount / (group.Count() * totalTables * 2m) * 100m, 2);
-
+                    var occupancyRate = totalTables == 0 ? 0 : Math.Round((decimal)bookingCount / (group.Count() * totalTables * 2m) * 100m, 2);
                     return new AdminPeakHourResponse
                     {
                         Hour = group.Key,
@@ -273,19 +205,15 @@ namespace BilliardsBooking.API.Controllers.Admin
                 .ToList();
         }
 
-        private static string NormalizePeriod(string period)
+        private static string NormalizePeriod(string period) => period?.Trim().ToLowerInvariant() switch
         {
-            return period?.Trim().ToLowerInvariant() switch
-            {
-                "day" => "day",
-                "week" => "week",
-                _ => "month"
-            };
-        }
+            "day" => "day",
+            "week" => "week",
+            _ => "month"
+        };
 
-        private static int ToMondayBasedDayOfWeek(DayOfWeek dayOfWeek)
-        {
-            return dayOfWeek == DayOfWeek.Sunday ? 6 : (int)dayOfWeek - 1;
-        }
+        private static string NormalizeBasis(string basis) => basis?.Trim().ToLowerInvariant() == "payment" ? "payment" : "service";
+
+        private static int ToMondayBasedDayOfWeek(DayOfWeek dayOfWeek) => dayOfWeek == DayOfWeek.Sunday ? 6 : (int)dayOfWeek - 1;
     }
 }

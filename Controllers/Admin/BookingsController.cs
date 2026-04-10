@@ -1,14 +1,9 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using BilliardsBooking.API.Data;
 using BilliardsBooking.API.DTOs;
 using BilliardsBooking.API.Enums;
-using BilliardsBooking.API.Models;
+using BilliardsBooking.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace BilliardsBooking.API.Controllers.Admin
 {
@@ -17,13 +12,18 @@ namespace BilliardsBooking.API.Controllers.Admin
     [Authorize(Roles = "Admin")]
     public class BookingsController : ControllerBase
     {
+        private readonly IBookingService _bookingService;
+        private readonly IReservationService _reservationService;
         private readonly AppDbContext _context;
-        private readonly BilliardsBooking.API.Services.IBookingService _bookingService;
 
-        public BookingsController(AppDbContext context, BilliardsBooking.API.Services.IBookingService bookingService)
+        public BookingsController(
+            IBookingService bookingService,
+            IReservationService reservationService,
+            AppDbContext context)
         {
-            _context = context;
             _bookingService = bookingService;
+            _reservationService = reservationService;
+            _context = context;
         }
 
         [HttpGet]
@@ -41,271 +41,49 @@ namespace BilliardsBooking.API.Controllers.Admin
                 return BadRequest(new { Message = "Page and pageSize must be greater than zero." });
             }
 
-            var query = _context.Bookings
-                .Include(booking => booking.User)
-                .Include(booking => booking.Table)
-                .AsQueryable();
-
-            if (!string.IsNullOrWhiteSpace(status))
-            {
-                if (!Enum.TryParse<BookingStatus>(status, true, out var parsedStatus))
-                {
-                    return BadRequest(new { Message = "Invalid booking status filter." });
-                }
-
-                query = query.Where(booking => booking.Status == parsedStatus);
-            }
-
-            if (tableId.HasValue)
-            {
-                query = query.Where(booking => booking.TableId == tableId.Value);
-            }
-
-            if (!string.IsNullOrWhiteSpace(userId))
-            {
-                if (!Guid.TryParse(userId, out var parsedUserId))
-                {
-                    return BadRequest(new { Message = "Invalid user id filter." });
-                }
-
-                query = query.Where(booking => booking.UserId == parsedUserId);
-            }
-
-            if (dateFrom.HasValue)
-            {
-                query = query.Where(booking => booking.BookingDate >= dateFrom.Value.Date);
-            }
-
-            if (dateTo.HasValue)
-            {
-                query = query.Where(booking => booking.BookingDate <= dateTo.Value.Date);
-            }
-
-            var totalItems = await query.CountAsync();
-            var bookings = await query
-                .OrderByDescending(booking => booking.BookingDate)
-                .ThenByDescending(booking => booking.StartTime)
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToListAsync();
-
-            var items = await BuildBookingResponsesAsync(bookings);
-
-            return Ok(new AdminBookingListResponse
-            {
-                Items = items,
-                TotalItems = totalItems,
-                Page = page,
-                PageSize = pageSize,
-                TotalPages = (int)Math.Ceiling(totalItems / (double)pageSize)
-            });
+            return Ok(await _bookingService.GetAdminBookingsAsync(page, pageSize, status, tableId, userId, dateFrom, dateTo));
         }
 
         [HttpGet("{id:guid}")]
         public async Task<ActionResult<AdminBookingResponse>> GetBookingById(Guid id)
         {
-            var booking = await _context.Bookings
-                .Include(item => item.User)
-                .Include(item => item.Table)
-                .FirstOrDefaultAsync(item => item.Id == id);
-
-            if (booking == null)
-            {
-                return NotFound(new { Message = "Booking not found." });
-            }
-
-            var response = await BuildBookingResponsesAsync(new List<Booking> { booking });
-            return Ok(response.First());
+            var booking = await _bookingService.GetAdminBookingByIdAsync(id);
+            return booking == null ? NotFound(new { Message = "Booking not found." }) : Ok(booking);
         }
 
         [HttpPut("{id:guid}")]
-        public async Task<ActionResult<AdminBookingResponse>> UpdateBookingStatus(Guid id, [FromBody] AdminUpdateBookingStatusRequest request)
+        public async Task<ActionResult> UpdateBookingStatus(Guid id, [FromBody] AdminUpdateBookingStatusRequest request)
         {
             if (!Enum.TryParse<BookingStatus>(request.Status, true, out var newStatus))
             {
                 return BadRequest(new { Message = "Invalid booking status." });
             }
 
-            var booking = await _context.Bookings
-                .Include(item => item.User)
-                .Include(item => item.Table)
-                .Include(item => item.Slots)
-                .FirstOrDefaultAsync(item => item.Id == id);
-
-            if (booking == null)
+            var reservation = await _reservationService.GetReservationAsync(id);
+            if (reservation == null)
             {
-                return NotFound(new { Message = "Booking not found." });
+                return BadRequest(new { Message = "Only online reservations support manual status updates from this endpoint." });
             }
 
-            if ((booking.Status == BookingStatus.Cancelled || booking.Status == BookingStatus.NoShow) && newStatus != booking.Status)
+            if (newStatus == BookingStatus.Cancelled && reservation.UserId.HasValue)
             {
-                return BadRequest(new { Message = "Cancelled or NoShow bookings cannot be reactivated from this endpoint." });
+                var result = await _reservationService.CancelReservationAsync(id, reservation.UserId.Value);
+                return result.Success ? Ok(new { Message = result.Message }) : BadRequest(new { Message = result.Message });
             }
 
-            booking.Status = newStatus;
-
-            if (newStatus == BookingStatus.Cancelled)
+            if (newStatus == BookingStatus.NoShow)
             {
-                booking.CancelledAt ??= DateTime.UtcNow;
-
-                foreach (var slot in booking.Slots)
-                {
-                    slot.IsActive = false;
-                }
+                var result = await _reservationService.MarkNoShowAsync(id);
+                return result.Success ? Ok(new { Message = result.Message }) : BadRequest(new { Message = result.Message });
             }
 
-            await _context.SaveChangesAsync();
-
-            var response = await BuildBookingResponsesAsync(new List<Booking> { booking });
-            return Ok(response.First());
+            return BadRequest(new { Message = "This endpoint only supports Cancelled and NoShow after the refactor." });
         }
 
         [HttpDelete("{id:guid}")]
-        public async Task<IActionResult> DeleteBooking(Guid id)
+        public IActionResult DeleteBooking(Guid id)
         {
-            var booking = await _context.Bookings.FirstOrDefaultAsync(item => item.Id == id);
-            if (booking == null)
-            {
-                return NotFound(new { Message = "Booking not found." });
-            }
-
-            var transaction = await _context.Database.BeginTransactionAsync();
-
-            try
-            {
-                var orderIds = await _context.FnBOrders
-                    .Where(order => order.BookingId == id)
-                    .Select(order => order.Id)
-                    .ToListAsync();
-
-                if (orderIds.Count > 0)
-                {
-                    var orderItems = await _context.FnBOrderItems
-                        .Where(orderItem => orderIds.Contains(orderItem.FnBOrderId))
-                        .ToListAsync();
-
-                    _context.FnBOrderItems.RemoveRange(orderItems);
-
-                    var orders = await _context.FnBOrders
-                        .Where(order => orderIds.Contains(order.Id))
-                        .ToListAsync();
-
-                    _context.FnBOrders.RemoveRange(orders);
-                }
-
-                var payments = await _context.Payments
-                    .Where(payment => payment.BookingId == id)
-                    .ToListAsync();
-                _context.Payments.RemoveRange(payments);
-
-                var coachingSessions = await _context.CoachingSessions
-                    .Where(session => session.BookingId == id)
-                    .ToListAsync();
-                _context.CoachingSessions.RemoveRange(coachingSessions);
-
-                _context.Bookings.Remove(booking);
-
-                await _context.SaveChangesAsync();
-                await transaction.CommitAsync();
-
-                return NoContent();
-            }
-            catch
-            {
-                await transaction.RollbackAsync();
-                throw;
-            }
-        }
-
-        private async Task<List<AdminBookingResponse>> BuildBookingResponsesAsync(List<Booking> bookings)
-        {
-            if (bookings.Count == 0)
-            {
-                return new List<AdminBookingResponse>();
-            }
-
-            var bookingIds = bookings.Select(booking => booking.Id).ToList();
-
-            var paymentMap = await _context.Payments
-                .Where(payment => payment.BookingId.HasValue && bookingIds.Contains(payment.BookingId.Value))
-                .OrderByDescending(payment => payment.CreatedAt)
-                .ToListAsync();
-
-            var fnbTotals = await _context.FnBOrders
-                .Where(order => bookingIds.Contains(order.BookingId))
-                .GroupBy(order => order.BookingId)
-                .Select(group => new { BookingId = group.Key, Total = group.Sum(order => order.TotalAmount) })
-                .ToListAsync();
-
-            var coachingSessions = await _context.CoachingSessions
-                .Where(session => session.BookingId.HasValue && bookingIds.Contains(session.BookingId.Value))
-                .ToListAsync();
-
-            var coachIds = coachingSessions.Select(session => session.CoachId).Distinct().ToList();
-
-            var coachNames = await _context.Coaches
-                .Include(coach => coach.User)
-                .Where(coach => coachIds.Contains(coach.Id))
-                .ToDictionaryAsync(coach => coach.Id, coach => coach.User != null ? coach.User.FullName : coach.Id.ToString());
-
-            var latestPaymentByBookingId = paymentMap
-                .Where(payment => payment.BookingId.HasValue)
-                .GroupBy(payment => payment.BookingId!.Value)
-                .ToDictionary(group => group.Key, group => group.First());
-
-            var fnbTotalByBookingId = fnbTotals.ToDictionary(item => item.BookingId, item => item.Total);
-            var coachingByBookingId = coachingSessions
-                .Where(session => session.BookingId.HasValue)
-                .GroupBy(session => session.BookingId!.Value)
-                .ToDictionary(group => group.Key, group => group.ToList());
-
-            return bookings.Select(booking =>
-            {
-                latestPaymentByBookingId.TryGetValue(booking.Id, out var payment);
-                fnbTotalByBookingId.TryGetValue(booking.Id, out var fnbTotal);
-                coachingByBookingId.TryGetValue(booking.Id, out var bookingCoachingSessions);
-
-                var coachingTotal = bookingCoachingSessions?.Sum(session => session.Cost) ?? 0;
-                var coachName = bookingCoachingSessions == null
-                    ? null
-                    : string.Join(", ",
-                        bookingCoachingSessions
-                            .Select(session => coachNames.TryGetValue(session.CoachId, out var foundCoachName)
-                                ? foundCoachName
-                                : session.CoachId.ToString())
-                            .Distinct());
-
-                return new AdminBookingResponse
-                {
-                    Id = booking.Id.ToString(),
-                    UserId = booking.UserId.HasValue ? booking.UserId.Value.ToString() : string.Empty,
-                    UserFullName = booking.User?.FullName ?? booking.GuestName ?? string.Empty,
-                    UserEmail = booking.User?.Email ?? string.Empty,
-                    TableId = booking.TableId,
-                    TableNumber = booking.Table?.TableNumber ?? string.Empty,
-                    RequestedTableType = booking.RequestedTableType,
-                    BookingDate = booking.BookingDate,
-                    StartTime = booking.BookingDate.Add(booking.StartTime),
-                    EndTime = booking.BookingDate.Add(booking.EndTime),
-                    TotalPrice = booking.ActualCost ?? (booking.TotalTableCost + fnbTotal + coachingTotal),
-                    DiscountAmount = booking.DiscountAmount,
-                    FnBTotal = fnbTotal,
-                    CoachingTotal = coachingTotal,
-                    PaymentAmount = payment?.Amount ?? 0,
-                    PaymentStatus = payment?.Status.ToString(),
-                    Status = booking.Status.ToString(),
-                    BookingType = booking.BookingType.ToString(),
-                    DepositAmount = booking.DepositAmount,
-                    DepositForfeited = booking.DepositForfeited,
-                    CheckedInAt = booking.CheckedInAt,
-                    CheckedOutAt = booking.CheckedOutAt,
-                    ActualCost = booking.ActualCost,
-                    GuestName = booking.GuestName,
-                    CreatedAt = booking.CreatedAt,
-                    CancelledAt = booking.CancelledAt,
-                    CoachName = coachName
-                };
-            }).ToList();
+            return BadRequest(new { Message = "Hard deletion is disabled after the reservation/session/invoice refactor." });
         }
 
         [HttpPost]
@@ -316,6 +94,7 @@ namespace BilliardsBooking.API.Controllers.Admin
             {
                 return BadRequest(new { Message = message });
             }
+
             return CreatedAtAction(nameof(GetBookingById), new { id = bookingId }, new { Id = bookingId, Message = message });
         }
 
@@ -323,44 +102,33 @@ namespace BilliardsBooking.API.Controllers.Admin
         public async Task<IActionResult> CheckIn(Guid id, [FromBody] CheckInRequest request)
         {
             var (success, message) = await _bookingService.CheckInAsync(id, request.TableId);
-            if (!success)
-            {
-                return BadRequest(new { Message = message });
-            }
-            return Ok(new { Message = message });
+            return success ? Ok(new { Message = message }) : BadRequest(new { Message = message });
         }
 
         [HttpGet("pending-checkin")]
         public async Task<IActionResult> GetPendingCheckins([FromQuery] DateTime date)
         {
             if (date == default) date = DateTime.UtcNow.Date;
-            var result = await _bookingService.GetPendingCheckinsAsync(date);
-            return Ok(result);
+            return Ok(await _bookingService.GetPendingCheckinsAsync(date));
         }
 
         [HttpGet("upcoming-warnings")]
         public async Task<IActionResult> GetUpcomingWarnings()
         {
-            var result = await _bookingService.GetUpcomingWarningsAsync();
-            return Ok(result);
+            return Ok(await _bookingService.GetUpcomingWarningsAsync());
         }
 
         [HttpPut("{id:guid}/link-coach-session")]
         public async Task<IActionResult> LinkCoachSession(Guid id, [FromBody] LinkCoachSessionRequest request)
         {
             var (success, message) = await _bookingService.LinkCoachSessionAsync(id, request.CoachingSessionId);
-            if (!success)
-            {
-                return BadRequest(new { Message = message });
-            }
-            return Ok(new { Message = message });
+            return success ? Ok(new { Message = message }) : BadRequest(new { Message = message });
         }
 
         [HttpGet("{id:guid}/available-coach-sessions")]
         public async Task<IActionResult> GetAvailableCoachSessions(Guid id)
         {
-            var result = await _bookingService.GetLinkableCoachSessionsAsync(id);
-            return Ok(result);
+            return Ok(await _bookingService.GetLinkableCoachSessionsAsync(id));
         }
 
         [HttpPut("{id:guid}/checkout")]
@@ -368,11 +136,7 @@ namespace BilliardsBooking.API.Controllers.Admin
         {
             var paymentMethod = request?.PaymentMethod ?? "Cash";
             var (success, message, summary) = await _bookingService.CheckOutAsync(id, paymentMethod);
-            if (!success)
-            {
-                return BadRequest(new { Message = message });
-            }
-            return Ok(new { Message = message, Summary = summary });
+            return success ? Ok(new { Message = message, Summary = summary }) : BadRequest(new { Message = message });
         }
     }
 }

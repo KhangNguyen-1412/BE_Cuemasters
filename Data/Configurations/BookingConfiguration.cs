@@ -28,6 +28,10 @@ namespace BilliardsBooking.API.Data.Configurations
         public void Configure(EntityTypeBuilder<Booking> builder)
         {
             builder.Property(b => b.RowVersion).IsRowVersion();
+            builder.Property(b => b.TotalTableCost).HasPrecision(18, 2);
+            builder.Property(b => b.DiscountAmount).HasPrecision(18, 2);
+            builder.Property(b => b.DepositAmount).HasPrecision(18, 2);
+            builder.Property(b => b.ActualCost).HasPrecision(18, 2);
 
             // TableId is nullable: online reservations remain unassigned until the admin checks them in.
             builder.HasOne(b => b.Table)

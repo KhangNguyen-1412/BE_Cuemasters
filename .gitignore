@@ -54,6 +54,13 @@ secrets.json
 # ========================================
 *.log
 logs/
+*.stdout.log
+*.stderr.log
+build_*.txt
+out.txt
+run_err.txt
+walkin_*.txt
+walkin_*.log
 
 # ========================================
 # OS generated files
@@ -76,3 +83,5 @@ desktop.ini
 *.tmp
 *.bak
 *.cache
+TestResults/
+appsettings.Local.json

@@ -1,11 +1,8 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using BilliardsBooking.API.Data;
 using BilliardsBooking.API.DTOs;
 using BilliardsBooking.API.Enums;
 using BilliardsBooking.API.Models;
+using BilliardsBooking.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -18,12 +15,12 @@ namespace BilliardsBooking.API.Controllers.Admin
     public class TablesController : ControllerBase
     {
         private readonly AppDbContext _context;
-        private readonly BilliardsBooking.API.Services.IBookingService _bookingService;
+        private readonly ITableSessionService _tableSessionService;
 
-        public TablesController(AppDbContext context, BilliardsBooking.API.Services.IBookingService bookingService)
+        public TablesController(AppDbContext context, ITableSessionService tableSessionService)
         {
             _context = context;
-            _bookingService = bookingService;
+            _tableSessionService = tableSessionService;
         }
 
         [HttpGet]
@@ -34,10 +31,23 @@ namespace BilliardsBooking.API.Controllers.Admin
                 .ThenBy(table => table.TableNumber)
                 .ToListAsync();
 
-            var bookings = await LoadRelevantBookingsAsync(tables.Select(table => table.Id).ToList());
-            var now = DateTime.UtcNow;
+            var activeSessions = await _context.TableSessions
+                .Include(session => session.User)
+                .Include(session => session.Table)
+                .Include(session => session.FnBOrders)
+                .Include(session => session.CoachingSessions)
+                .Where(session => session.Status == TableSessionStatus.Active)
+                .ToListAsync();
 
-            return Ok(tables.Select(table => MapTable(table, bookings, now)).ToList());
+            var upcomingReservations = await _context.Reservations
+                .Include(reservation => reservation.User)
+                .Where(reservation => reservation.Status == ReservationStatus.Confirmed)
+                .OrderBy(reservation => reservation.BookingDate)
+                .ThenBy(reservation => reservation.StartTime)
+                .ToListAsync();
+
+            var now = DateTime.UtcNow;
+            return Ok(tables.Select(table => MapTable(table, activeSessions, upcomingReservations, now)).ToList());
         }
 
         [HttpGet("{id:int}")]
@@ -49,8 +59,23 @@ namespace BilliardsBooking.API.Controllers.Admin
                 return NotFound(new { Message = "Table not found." });
             }
 
-            var bookings = await LoadRelevantBookingsAsync(new List<int> { id });
-            return Ok(MapTable(table, bookings, DateTime.UtcNow));
+            var activeSessions = await _context.TableSessions
+                .Include(session => session.User)
+                .Include(session => session.Table)
+                .Include(session => session.FnBOrders)
+                .Include(session => session.CoachingSessions)
+                .Where(session => session.Status == TableSessionStatus.Active && session.TableId == id)
+                .ToListAsync();
+
+            var upcomingReservations = await _context.Reservations
+                .Include(reservation => reservation.User)
+                .Where(reservation => reservation.Status == ReservationStatus.Confirmed &&
+                                      reservation.RequestedTableType == table.Type)
+                .OrderBy(reservation => reservation.BookingDate)
+                .ThenBy(reservation => reservation.StartTime)
+                .ToListAsync();
+
+            return Ok(MapTable(table, activeSessions, upcomingReservations, DateTime.UtcNow));
         }
 
         [HttpPost]
@@ -62,10 +87,7 @@ namespace BilliardsBooking.API.Controllers.Admin
             }
 
             var normalizedTableNumber = request.TableNumber.Trim();
-
-            var tableNumberExists = await _context.Tables
-                .AnyAsync(table => table.TableNumber.ToLower() == normalizedTableNumber.ToLower());
-
+            var tableNumberExists = await _context.Tables.AnyAsync(table => table.TableNumber.ToLower() == normalizedTableNumber.ToLower());
             if (tableNumberExists)
             {
                 return Conflict(new { Message = "A table with this number already exists." });
@@ -77,6 +99,7 @@ namespace BilliardsBooking.API.Controllers.Admin
                 Type = tableType,
                 HourlyRate = request.HourlyRate,
                 Status = tableStatus,
+                RealTimeStatus = tableStatus == TableManualStatus.Maintenance ? TableRealTimeStatus.Maintenance : TableRealTimeStatus.Available,
                 IsActive = request.IsActive,
                 PositionX = request.PositionX,
                 PositionY = request.PositionY
@@ -85,7 +108,7 @@ namespace BilliardsBooking.API.Controllers.Admin
             _context.Tables.Add(table);
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(GetTableById), new { id = table.Id }, MapTable(table, new List<Booking>(), DateTime.UtcNow));
+            return CreatedAtAction(nameof(GetTableById), new { id = table.Id }, MapTable(table, new List<TableSession>(), new List<Reservation>(), DateTime.UtcNow));
         }
 
         [HttpPut("{id:int}")]
@@ -103,12 +126,7 @@ namespace BilliardsBooking.API.Controllers.Admin
             }
 
             var normalizedTableNumber = request.TableNumber.Trim();
-
-            var tableNumberExists = await _context.Tables
-                .AnyAsync(existingTable =>
-                    existingTable.Id != id &&
-                    existingTable.TableNumber.ToLower() == normalizedTableNumber.ToLower());
-
+            var tableNumberExists = await _context.Tables.AnyAsync(existing => existing.Id != id && existing.TableNumber.ToLower() == normalizedTableNumber.ToLower());
             if (tableNumberExists)
             {
                 return Conflict(new { Message = "A table with this number already exists." });
@@ -118,14 +136,13 @@ namespace BilliardsBooking.API.Controllers.Admin
             table.Type = tableType;
             table.HourlyRate = request.HourlyRate;
             table.Status = tableStatus;
+            table.RealTimeStatus = tableStatus == TableManualStatus.Maintenance ? TableRealTimeStatus.Maintenance : table.RealTimeStatus;
             table.IsActive = request.IsActive;
             table.PositionX = request.PositionX;
             table.PositionY = request.PositionY;
 
             await _context.SaveChangesAsync();
-
-            var bookings = await LoadRelevantBookingsAsync(new List<int> { table.Id });
-            return Ok(MapTable(table, bookings, DateTime.UtcNow));
+            return await GetTableById(id);
         }
 
         [HttpDelete("{id:int}")]
@@ -137,20 +154,18 @@ namespace BilliardsBooking.API.Controllers.Admin
                 return NotFound(new { Message = "Table not found." });
             }
 
-            var hasBookingHistory = await _context.Bookings.AnyAsync(booking => booking.TableId == id);
-
-            if (hasBookingHistory)
+            var hasSessionHistory = await _context.TableSessions.AnyAsync(session => session.TableId == id);
+            if (hasSessionHistory)
             {
                 table.IsActive = false;
                 table.Status = TableManualStatus.Maintenance;
+                table.RealTimeStatus = TableRealTimeStatus.Maintenance;
                 await _context.SaveChangesAsync();
-
-                return Ok(new { Message = "Table archived because it already has booking history." });
+                return Ok(new { Message = "Table archived because it already has session history." });
             }
 
             _context.Tables.Remove(table);
             await _context.SaveChangesAsync();
-
             return NoContent();
         }
 
@@ -162,55 +177,40 @@ namespace BilliardsBooking.API.Controllers.Admin
                 return BadRequest(new { Message = "Guest name is required." });
             }
 
-            var (success, message, bookingId) = await _bookingService.StartWalkInAsync(id, request.GuestName.Trim());
-            if (!success)
-            {
-                return BadRequest(new { Message = message });
-            }
-            return Ok(new { Id = bookingId, Message = message });
+            var (success, message, sessionId) = await _tableSessionService.StartWalkInAsync(id, request.GuestName.Trim());
+            return success
+                ? Ok(new { Id = sessionId, Message = message })
+                : BadRequest(new { Message = message });
         }
 
-        private async Task<List<Booking>> LoadRelevantBookingsAsync(List<int> tableIds)
+        [HttpPost("{id:int}/maintenance")]
+        public async Task<IActionResult> SetMaintenance(int id)
         {
-            if (tableIds.Count == 0)
-            {
-                return new List<Booking>();
-            }
-
-            var today = DateTime.UtcNow.Date;
-            var futureWindow = today.AddDays(7);
-
-            return await _context.Bookings
-                .Include(booking => booking.User)
-                .Where(booking =>
-                    booking.TableId.HasValue && tableIds.Contains(booking.TableId.Value) &&
-                    booking.Status != BookingStatus.Cancelled &&
-                    booking.Status != BookingStatus.NoShow &&
-                    booking.BookingDate >= today &&
-                    booking.BookingDate <= futureWindow)
-                .ToListAsync();
+            var (success, message) = await _tableSessionService.SetTableMaintenanceAsync(id);
+            return success ? Ok(new { Message = message }) : BadRequest(new { Message = message });
         }
 
-        private static AdminTableResponse MapTable(BilliardTable table, IEnumerable<Booking> bookings, DateTime now)
+        private static AdminTableResponse MapTable(
+            BilliardTable table,
+            IEnumerable<TableSession> activeSessions,
+            IEnumerable<Reservation> upcomingReservations,
+            DateTime now)
         {
-            var currentBooking = bookings
-                .Where(booking =>
-                    booking.TableId == table.Id &&
-                    booking.BookingDate.Date == now.Date &&
-                    booking.BookingDate.Add(booking.StartTime) <= now &&
-                    booking.BookingDate.Add(booking.EndTime) > now &&
-                    (booking.Status == BookingStatus.Confirmed || booking.Status == BookingStatus.InProgress))
-                .OrderByDescending(booking => booking.StartTime)
+            var currentSession = activeSessions
+                .Where(session => session.TableId == table.Id)
+                .OrderByDescending(session => session.StartedAt)
                 .FirstOrDefault();
 
-            var nextBooking = bookings
-                .Where(booking =>
-                    booking.TableId == table.Id &&
-                    booking.BookingDate.Add(booking.StartTime) > now &&
-                    (booking.Status == BookingStatus.Confirmed || booking.Status == BookingStatus.InProgress))
-                .OrderBy(booking => booking.BookingDate)
-                .ThenBy(booking => booking.StartTime)
+            var nextReservation = upcomingReservations
+                .Where(reservation => reservation.RequestedTableType == table.Type &&
+                                      reservation.BookingDate.Add(reservation.StartTime) > now)
+                .OrderBy(reservation => reservation.BookingDate)
+                .ThenBy(reservation => reservation.StartTime)
                 .FirstOrDefault();
+
+            var currentDurationHours = currentSession == null
+                ? 0
+                : Math.Max(0m, (decimal)((DateTime.UtcNow - currentSession.StartedAt).TotalHours));
 
             return new AdminTableResponse
             {
@@ -219,41 +219,29 @@ namespace BilliardsBooking.API.Controllers.Admin
                 Type = table.Type.ToString(),
                 HourlyRate = table.HourlyRate,
                 ManualStatus = table.Status.ToString(),
-                DisplayStatus = GetDisplayStatus(table, currentBooking, nextBooking),
+                DisplayStatus = GetDisplayStatus(table, currentSession, nextReservation, now),
                 IsActive = table.IsActive,
                 PositionX = table.PositionX,
                 PositionY = table.PositionY,
-                CurrentCustomerName = currentBooking?.GuestName ?? currentBooking?.User?.FullName,
-                CurrentSessionStartedAt = currentBooking?.CheckedInAt ?? (currentBooking == null ? null : currentBooking.BookingDate.Add(currentBooking.StartTime)),
-                NextBookingStartTime = nextBooking == null ? null : nextBooking.BookingDate.Add(nextBooking.StartTime),
-                NextBookingId = nextBooking?.Id.ToString(),
-                NextCustomerName = nextBooking?.GuestName ?? nextBooking?.User?.FullName,
-                CurrentSessionAmount = currentBooking?.TotalTableCost ?? 0
+                CurrentCustomerName = currentSession?.GuestName ?? currentSession?.User?.FullName,
+                CurrentSessionStartedAt = currentSession?.StartedAt,
+                NextBookingStartTime = nextReservation == null ? null : nextReservation.BookingDate.Add(nextReservation.StartTime),
+                NextBookingId = nextReservation?.Id.ToString(),
+                NextCustomerName = nextReservation?.User?.FullName,
+                CurrentSessionAmount = currentSession == null
+                    ? 0
+                    : Math.Round(currentDurationHours * table.HourlyRate, 2) +
+                      currentSession.FnBOrders.Sum(order => order.TotalAmount) +
+                      currentSession.CoachingSessions.Sum(session => session.Cost)
             };
         }
 
-        private static string GetDisplayStatus(BilliardTable table, Booking? currentBooking, Booking? nextBooking)
+        private static string GetDisplayStatus(BilliardTable table, TableSession? currentSession, Reservation? nextReservation, DateTime now)
         {
-            if (!table.IsActive)
-            {
-                return "Inactive";
-            }
-
-            if (table.Status == TableManualStatus.Maintenance)
-            {
-                return "Maintenance";
-            }
-
-            if (currentBooking != null)
-            {
-                return "InUse";
-            }
-
-            if (nextBooking != null)
-            {
-                return "Reserved";
-            }
-
+            if (!table.IsActive) return "Inactive";
+            if (table.Status == TableManualStatus.Maintenance || table.RealTimeStatus == TableRealTimeStatus.Maintenance) return "Maintenance";
+            if (currentSession != null || table.RealTimeStatus == TableRealTimeStatus.Occupied) return "InUse";
+            if (nextReservation != null && nextReservation.BookingDate.Add(nextReservation.StartTime) <= now.AddMinutes(30)) return "Reserved";
             return "Available";
         }
 

@@ -1,12 +1,8 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
 using BilliardsBooking.API.Data;
 using BilliardsBooking.API.DTOs;
-using BilliardsBooking.API.Models;
 using BilliardsBooking.API.Enums;
+using BilliardsBooking.API.Services.StateMachines;
+using Microsoft.EntityFrameworkCore;
 
 namespace BilliardsBooking.API.Services
 {
@@ -27,50 +23,134 @@ namespace BilliardsBooking.API.Services
 
         public async Task<PaymentResponse?> CreatePaymentAsync(CreatePaymentRequest request)
         {
-            var bookingId = Guid.Parse(request.BookingId);
-            var booking = await _context.Bookings.FindAsync(bookingId);
-            if (booking == null) return null;
+            if (!Guid.TryParse(request.BookingId, out var legacyId))
+            {
+                return null;
+            }
 
-            var payment = new Payment
+            if (!Enum.TryParse<PaymentMethod>(request.PaymentMethod, true, out var method))
+            {
+                method = PaymentMethod.Cash;
+            }
+
+            var reservation = await _context.Reservations.FirstOrDefaultAsync(r => r.Id == legacyId);
+            if (reservation != null)
+            {
+                var existingDeposit = await _context.Payments
+                    .Where(p => p.ReservationId == legacyId && p.Type == PaymentType.Deposit)
+                    .OrderByDescending(p => p.CompletedAt ?? p.CreatedAt)
+                    .FirstOrDefaultAsync();
+
+                if (existingDeposit != null)
+                {
+                    return Map(existingDeposit);
+                }
+
+                var payment = new Models.Payment
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = reservation.UserId,
+                    ReservationId = reservation.Id,
+                    Type = PaymentType.Deposit,
+                    Method = method,
+                    Status = PaymentStatus.Completed,
+                    Amount = reservation.DepositAmount,
+                    CreatedAt = DateTime.UtcNow,
+                    CompletedAt = DateTime.UtcNow,
+                    Notes = "Reservation deposit"
+                };
+
+                _context.Payments.Add(payment);
+                if (reservation.Status == ReservationStatus.Pending)
+                {
+                    ReservationStateMachine.Transition(reservation, ReservationStatus.Confirmed);
+                }
+
+                await _context.SaveChangesAsync();
+                return Map(payment);
+            }
+
+            var session = await _context.TableSessions
+                .Include(s => s.Invoice)
+                    .ThenInclude(i => i!.Payments)
+                .FirstOrDefaultAsync(s => s.Id == legacyId || s.ReservationId == legacyId);
+
+            if (session?.Invoice == null)
+            {
+                return null;
+            }
+
+            var latestPayment = session.Invoice.Payments
+                .OrderByDescending(p => p.CompletedAt ?? p.CreatedAt)
+                .FirstOrDefault();
+            if (latestPayment != null)
+            {
+                return Map(latestPayment);
+            }
+
+            var amount = session.Type == SessionType.WalkIn ? session.Invoice.GrandTotal : session.Invoice.BalanceDue;
+            var paymentType = session.Type == SessionType.WalkIn ? PaymentType.FullPayment : PaymentType.FinalSettlement;
+
+            var settlement = new Models.Payment
             {
                 Id = Guid.NewGuid(),
-                BookingId = bookingId,
-                UserId = booking.UserId ?? Guid.Empty,
-                Amount = booking.TotalTableCost, /* Booking doesn't have TotalPrice, wait */
-                Method = request.PaymentMethod == "Cash" ? PaymentMethod.Cash : PaymentMethod.VnPay,
-                Status = PaymentStatus.Completed, // Assume immediate success for MVP
-                CreatedAt = DateTime.UtcNow
+                UserId = session.UserId,
+                InvoiceId = session.Invoice.Id,
+                Type = paymentType,
+                Method = method,
+                Status = PaymentStatus.Completed,
+                Amount = amount,
+                CreatedAt = DateTime.UtcNow,
+                CompletedAt = DateTime.UtcNow,
+                Notes = "Settlement payment"
             };
 
-            _context.Payments.Add(payment);
-            booking.Status = BookingStatus.Confirmed; // Update booking status when paid
+            _context.Payments.Add(settlement);
+            session.Invoice.PaymentCompletedAt = settlement.CompletedAt;
             await _context.SaveChangesAsync();
-
-            return new PaymentResponse
-            {
-                Id = payment.Id.ToString(),
-                BookingId = payment.BookingId?.ToString() ?? "",
-                Amount = payment.Amount,
-                Method = payment.Method.ToString(),
-                Status = payment.Status.ToString(),
-                CreatedAt = payment.CreatedAt
-            };
+            return Map(settlement);
         }
 
         public async Task<List<PaymentResponse>> GetPaymentsByBookingAsync(Guid bookingId)
         {
-            return await _context.Payments
-                .Where(p => p.BookingId == bookingId)
-                .Select(p => new PaymentResponse
-                {
-                    Id = p.Id.ToString(),
-                    BookingId = p.BookingId.ToString() ?? "",
-                    Amount = p.Amount,
-                    Method = p.Method.ToString(),
-                    Status = p.Status.ToString(),
-                    CreatedAt = p.CreatedAt
-                })
+            var payments = await _context.Payments
+                .Where(p => p.ReservationId == bookingId || p.BookingId == bookingId)
+                .OrderByDescending(p => p.CompletedAt ?? p.CreatedAt)
                 .ToListAsync();
+
+            var session = await _context.TableSessions
+                .Include(s => s.Invoice)
+                    .ThenInclude(i => i!.Payments)
+                .FirstOrDefaultAsync(s => s.Id == bookingId || s.ReservationId == bookingId);
+
+            if (session?.Invoice != null)
+            {
+                payments.AddRange(session.Invoice.Payments.Where(p => payments.All(existing => existing.Id != p.Id)));
+            }
+
+            return payments
+                .OrderByDescending(p => p.CompletedAt ?? p.CreatedAt)
+                .Select(Map)
+                .ToList();
+        }
+
+        private static PaymentResponse Map(Models.Payment payment)
+        {
+            return new PaymentResponse
+            {
+                Id = payment.Id.ToString(),
+                BookingId = payment.BookingId?.ToString() ?? string.Empty,
+                ReservationId = payment.ReservationId?.ToString() ?? string.Empty,
+                InvoiceId = payment.InvoiceId?.ToString() ?? string.Empty,
+                Type = payment.Type.ToString(),
+                Amount = payment.Amount,
+                Method = payment.Method.ToString(),
+                Status = payment.Status.ToString(),
+                TransactionId = payment.TransactionId,
+                Notes = payment.Notes,
+                CreatedAt = payment.CreatedAt,
+                CompletedAt = payment.CompletedAt
+            };
         }
     }
 }

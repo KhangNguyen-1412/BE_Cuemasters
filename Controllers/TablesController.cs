@@ -1,8 +1,6 @@
-using System;
-using System.Linq;
-using System.Threading.Tasks;
 using BilliardsBooking.API.Data;
 using BilliardsBooking.API.Enums;
+using BilliardsBooking.API.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,9 +11,9 @@ namespace BilliardsBooking.API.Controllers
     public class TablesController : ControllerBase
     {
         private readonly AppDbContext _context;
-        private readonly BilliardsBooking.API.Services.ITableService _tableService;
+        private readonly ITableService _tableService;
 
-        public TablesController(AppDbContext context, BilliardsBooking.API.Services.ITableService tableService)
+        public TablesController(AppDbContext context, ITableService tableService)
         {
             _context = context;
             _tableService = tableService;
@@ -30,21 +28,14 @@ namespace BilliardsBooking.API.Controllers
             }
 
             var availability = await _tableService.GetTableAvailabilityAsync(id, date);
-            if (availability == null)
-            {
-                return NotFound(new { Message = "Table not found or not available." });
-            }
-
-            return Ok(availability);
+            return availability == null
+                ? NotFound(new { Message = "Table not found or not available." })
+                : Ok(availability);
         }
 
         [HttpGet]
         public async Task<IActionResult> GetTables()
         {
-            var now = DateTime.UtcNow.TimeOfDay;
-            var today = DateTime.UtcNow.Date;
-
-            // Simple active tables retrieval
             var tables = await _context.Tables
                 .Where(t => t.IsActive)
                 .Select(t => new
@@ -55,9 +46,12 @@ namespace BilliardsBooking.API.Controllers
                     t.HourlyRate,
                     t.PositionX,
                     t.PositionY,
-                    t.Status, // Base status (Maintenance/Available)
-                    // We can augment this dynamically based on any active slots right now
-                    ActiveBookingsCount = _context.BookingSlots.Count(bs => bs.TableId == t.Id && bs.SlotDate == today && bs.IsActive && bs.SlotStart <= now && bs.SlotStart >= now.Subtract(TimeSpan.FromMinutes(30)))
+                    ManualStatus = t.Status,
+                    RealTimeStatus = t.RealTimeStatus,
+                    ActiveSessionId = _context.TableSessions
+                        .Where(s => s.TableId == t.Id && s.Status == TableSessionStatus.Active)
+                        .Select(s => (Guid?)s.Id)
+                        .FirstOrDefault()
                 })
                 .ToListAsync();
 
@@ -69,8 +63,11 @@ namespace BilliardsBooking.API.Controllers
                 t.HourlyRate,
                 t.PositionX,
                 t.PositionY,
-                // Override computed status if someone is currently playing
-                Status = t.Status == TableManualStatus.Maintenance ? "Maintenance" : (t.ActiveBookingsCount > 0 ? "InUse" : "Available")
+                Status = t.ManualStatus == TableManualStatus.Maintenance
+                    ? "Maintenance"
+                    : t.RealTimeStatus == TableRealTimeStatus.Occupied || t.ActiveSessionId != null
+                        ? "InUse"
+                        : "Available"
             });
 
             return Ok(result);

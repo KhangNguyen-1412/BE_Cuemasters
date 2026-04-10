@@ -204,6 +204,7 @@ namespace BilliardsBooking.API.DTOs
     public class AdminAnalyticsResponse
     {
         public string Period { get; set; } = string.Empty;
+        public string Basis { get; set; } = "service";
         public List<AdminRevenuePointResponse> RevenueByPeriod { get; set; } = new();
         public List<AdminRevenueSourceResponse> RevenueBySource { get; set; } = new();
         public List<AdminHeatmapCellResponse> OccupancyHeatmap { get; set; } = new();

@@ -11,7 +11,14 @@ namespace BilliardsBooking.API.Data
         public DbSet<BilliardTable> Tables { get; set; } = null!;
         public DbSet<Booking> Bookings { get; set; } = null!;
         public DbSet<BookingSlot> BookingSlots { get; set; } = null!;
-        
+        public DbSet<Reservation> Reservations { get; set; } = null!;
+        public DbSet<ReservationSlot> ReservationSlots { get; set; } = null!;
+        public DbSet<TableSession> TableSessions { get; set; } = null!;
+        public DbSet<Invoice> Invoices { get; set; } = null!;
+        public DbSet<InvoiceLine> InvoiceLines { get; set; } = null!;
+        public DbSet<BufferConfig> BufferConfigs { get; set; } = null!;
+        public DbSet<AuditLog> AuditLogs { get; set; } = null!;
+
         public DbSet<Coach> Coaches { get; set; } = null!;
         public DbSet<CoachAvailability> CoachAvailabilities { get; set; } = null!;
         public DbSet<CoachingSession> CoachingSessions { get; set; } = null!;

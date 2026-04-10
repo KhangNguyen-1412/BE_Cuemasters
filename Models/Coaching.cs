@@ -45,8 +45,8 @@ namespace BilliardsBooking.API.Models
 
         // Null at creation time — the session is independent of any table reservation.
         // Populated when an admin links this session to a table booking at checkout.
-        public Guid? BookingId { get; set; }
-        public Booking? Booking { get; set; }
+        public Guid? TableSessionId { get; set; }
+        public TableSession? TableSession { get; set; }
 
         public Guid StudentUserId { get; set; }
         public User? StudentUser { get; set; }

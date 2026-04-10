@@ -1,24 +1,9 @@
 using BilliardsBooking.API.Data;
 using BilliardsBooking.API.Enums;
-using BilliardsBooking.API.Hubs;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace BilliardsBooking.API.Services
 {
-    /// <summary>
-    /// Background job that runs every 5 minutes to auto-cancel no-show bookings.
-    /// A no-show is a Confirmed booking where:
-    ///   - BookingDate + StartTime + 15 min grace period &lt; UtcNow
-    ///   - CheckedInAt is still null (customer never arrived)
-    /// Actions taken:
-    ///   - Status → NoShow
-    ///   - DepositForfeited → true (owner keeps the deposit)
-    ///   - All BookingSlots released (IsActive = false) → frees category capacity
-    ///   - SignalR notification sent so the floor plan refreshes availability
-    /// NOTE: CoachingSessions are independent entities and are NOT cascaded — a coach
-    /// no-show is a separate concern tracked on the session itself.
-    /// </summary>
     public class NoShowWorker : BackgroundService
     {
         private readonly IServiceScopeFactory _scopeFactory;
@@ -35,7 +20,6 @@ namespace BilliardsBooking.API.Services
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("NoShowWorker started.");
-
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
@@ -57,51 +41,28 @@ namespace BilliardsBooking.API.Services
         {
             using var scope = _scopeFactory.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<TableStatusHub>>();
+            var reservationService = scope.ServiceProvider.GetRequiredService<IReservationService>();
 
             var now = DateTime.UtcNow;
             var graceCutoff = now - GracePeriod;
 
-            // Find all confirmed bookings past their grace period with no check-in
-            var noShowBookings = await context.Bookings
-                .Include(b => b.Slots)
-                .Where(b =>
-                    b.Status == BookingStatus.Confirmed &&
-                    b.CheckedInAt == null &&
-                    (b.BookingDate < graceCutoff.Date ||
-                     (b.BookingDate == graceCutoff.Date && b.StartTime <= graceCutoff.TimeOfDay)))
+            var reservations = await context.Reservations
+                .Where(r => r.Status == ReservationStatus.Confirmed &&
+                            (r.BookingDate < graceCutoff.Date ||
+                             (r.BookingDate == graceCutoff.Date && r.StartTime <= graceCutoff.TimeOfDay)))
+                .Select(r => r.Id)
                 .ToListAsync(cancellationToken);
 
-            if (noShowBookings.Count == 0) return;
+            if (reservations.Count == 0) return;
 
-            _logger.LogInformation("Found {Count} no-show bookings to process.", noShowBookings.Count);
-
-            foreach (var booking in noShowBookings)
+            _logger.LogInformation("Found {Count} no-show reservations to process.", reservations.Count);
+            foreach (var reservationId in reservations)
             {
-                booking.Status = BookingStatus.NoShow;
-                booking.DepositForfeited = true;
-
-                // Release all booking slots → category capacity recovered.
-                foreach (var slot in booking.Slots)
+                var result = await reservationService.MarkNoShowAsync(reservationId);
+                if (!result.Success)
                 {
-                    slot.IsActive = false;
+                    _logger.LogWarning("Failed to mark reservation {ReservationId} as no-show: {Message}", reservationId, result.Message);
                 }
-
-                _logger.LogInformation(
-                    "Booking {BookingId} marked as NoShow. Category {Category}, Deposit {Deposit} forfeited.",
-                    booking.Id, booking.RequestedTableType, booking.DepositAmount);
-            }
-
-            await context.SaveChangesAsync(cancellationToken);
-
-            // SignalR: notify floor plan that category capacity freed.
-            var affectedCategories = noShowBookings.Select(b => b.RequestedTableType).Distinct();
-            var today = now.Date;
-            foreach (var category in affectedCategories)
-            {
-                await hubContext.Clients
-                    .Group($"floorplan-{today:yyyy-MM-dd}")
-                    .SendAsync("CategoryCapacityChanged", category.ToString(), today, cancellationToken);
             }
         }
     }
