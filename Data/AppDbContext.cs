@@ -32,6 +32,7 @@ namespace BilliardsBooking.API.Data
         public DbSet<MembershipBenefitUsage> MembershipBenefitUsages { get; set; } = null!;
         
         public DbSet<Payment> Payments { get; set; } = null!;
+        public DbSet<QueuedEmail> QueuedEmails { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

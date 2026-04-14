@@ -21,10 +21,12 @@ namespace BilliardsBooking.API.Services
     public class MembershipService : IMembershipService
     {
         private readonly AppDbContext _context;
+        private readonly IAuditService _auditService;
 
-        public MembershipService(AppDbContext context)
+        public MembershipService(AppDbContext context, IAuditService auditService)
         {
             _context = context;
+            _auditService = auditService;
         }
 
         public async Task<List<MembershipPlanResponse>> GetPlansAsync()
@@ -115,6 +117,21 @@ namespace BilliardsBooking.API.Services
 
             _context.UserMemberships.Add(newMembership);
             _context.Payments.Add(payment);
+
+            await _auditService.LogAsync(
+                AuditAction.PaymentRecorded,
+                nameof(Payment),
+                payment.Id.ToString(),
+                userId.ToString(),
+                newValue: new { payment.Type, payment.Amount, payment.Method, payment.Status, PlanId = plan.Id });
+
+            await _auditService.LogAsync(
+                AuditAction.UserStatusChanged,
+                nameof(UserMembership),
+                newMembership.Id.ToString(),
+                userId.ToString(),
+                newValue: new { PlanId = plan.Id, Tier = plan.Tier.ToString(), plan.Name });
+
             await _context.SaveChangesAsync();
 
             return await GetUserMembershipAsync(userId);

@@ -15,10 +15,12 @@ namespace BilliardsBooking.API.Services
     public class PaymentService : IPaymentService
     {
         private readonly AppDbContext _context;
+        private readonly IAuditService _auditService;
 
-        public PaymentService(AppDbContext context)
+        public PaymentService(AppDbContext context, IAuditService auditService)
         {
             _context = context;
+            _auditService = auditService;
         }
 
         public async Task<PaymentResponse?> CreatePaymentAsync(CreatePaymentRequest request)
@@ -61,6 +63,14 @@ namespace BilliardsBooking.API.Services
                 };
 
                 _context.Payments.Add(payment);
+
+                await _auditService.LogAsync(
+                    AuditAction.PaymentRecorded,
+                    nameof(Models.Payment),
+                    payment.Id.ToString(),
+                    payment.UserId.ToString(),
+                    newValue: new { payment.Type, payment.Amount, payment.Method, payment.Status });
+
                 if (reservation.Status == ReservationStatus.Pending)
                 {
                     ReservationStateMachine.Transition(reservation, ReservationStatus.Confirmed);
@@ -106,6 +116,14 @@ namespace BilliardsBooking.API.Services
             };
 
             _context.Payments.Add(settlement);
+
+            await _auditService.LogAsync(
+                AuditAction.PaymentRecorded,
+                nameof(Models.Payment),
+                settlement.Id.ToString(),
+                settlement.UserId.ToString(),
+                newValue: new { settlement.Type, settlement.Amount, settlement.Method, settlement.Status });
+
             session.Invoice.PaymentCompletedAt = settlement.CompletedAt;
             await _context.SaveChangesAsync();
             return Map(settlement);

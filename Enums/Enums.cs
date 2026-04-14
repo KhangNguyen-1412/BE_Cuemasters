@@ -17,6 +17,7 @@ namespace BilliardsBooking.API.Enums
     public enum Specialty { Pool, Snooker, Carom, AllRound }
     public enum FnBCategory { Drinks, Snacks, Combos, MainCourse }
     public enum BenefitType { TableDiscount, PriorityBooking, FreeCoaching }
+    public enum QueuedEmailStatus { Pending, Sent, Failed }
     public enum AuditAction
     {
         ReservationCreated,
@@ -30,6 +31,11 @@ namespace BilliardsBooking.API.Enums
         SessionCheckedOut,
         TableStatusOverride,
         PaymentRecorded,
-        BufferConfigChanged
+        BufferConfigChanged,
+        UserRegistered,
+        UserLogin,
+        UserLoginFailed,
+        UserPasswordChanged,
+        UserStatusChanged
     }
 }

@@ -30,9 +30,11 @@ builder.Services.AddScoped<BilliardsBooking.API.Services.ICoachService, Billiard
 builder.Services.AddScoped<BilliardsBooking.API.Services.IFnBService, BilliardsBooking.API.Services.FnBService>();
 builder.Services.AddScoped<BilliardsBooking.API.Services.IMembershipService, BilliardsBooking.API.Services.MembershipService>();
 builder.Services.AddScoped<BilliardsBooking.API.Services.IPaymentService, BilliardsBooking.API.Services.PaymentService>();
+builder.Services.AddScoped<BilliardsBooking.API.Services.IEmailQueueService, BilliardsBooking.API.Services.EmailQueueService>();
 
 // Background Services
 builder.Services.AddHostedService<BilliardsBooking.API.Services.NoShowWorker>();
+builder.Services.AddHostedService<BilliardsBooking.API.Services.EmailBackgroundWorker>();
 
 // Configure CORS
 var allowedOrigins = builder.Configuration.GetValue<string>("Cors:AllowedOrigins") ?? "http://localhost:5173,http://localhost:3000";
