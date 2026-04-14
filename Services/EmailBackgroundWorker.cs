@@ -77,7 +77,16 @@ namespace BilliardsBooking.API.Services
 
             if (string.IsNullOrEmpty(host))
             {
-                _logger.LogWarning("SMTP Host is not configured. Skipping email processing.");
+                _logger.LogWarning("SMTP Host is not configured. Logging emails to console for development.");
+                foreach (var email in pendingEmails)
+                {
+                    _logger.LogInformation("DEV EMAIL LOG: To: {To}, Subject: {Subject}, Body: {Body}", 
+                        email.To, email.Subject, email.Body);
+                    
+                    email.Status = QueuedEmailStatus.Sent;
+                    email.LastAttemptAt = DateTime.UtcNow;
+                }
+                await context.SaveChangesAsync(stoppingToken);
                 return;
             }
 
